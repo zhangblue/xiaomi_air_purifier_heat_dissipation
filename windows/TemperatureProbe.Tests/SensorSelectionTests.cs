@@ -47,10 +47,38 @@ public class SensorSelectionTests
     }
 
     [Fact]
+    public void UsesAmdDieTemperatureBeforeControlTemperature()
+    {
+        SensorReading[] readings =
+        [
+            new("Core (Tctl)", 75),
+            new("Core (Tdie)", 65),
+            new("CCD1 (Tdie)", 61),
+        ];
+
+        Assert.Equal(65f, SensorSelector.SelectCpuTemperature(readings));
+    }
+
+    [Fact]
+    public void UsesCombinedAmdTemperatureWhenSeparateDieIsUnavailable()
+    {
+        SensorReading[] readings =
+        [
+            new("Core (Tdie)", null),
+            new("Core (Tctl/Tdie)", 68),
+        ];
+
+        Assert.Equal(68f, SensorSelector.SelectCpuTemperature(readings));
+    }
+
+    [Fact]
     public void ThrowsWhenNoUsableCpuTemperatureExists()
     {
-        Assert.Throws<InvalidOperationException>(() =>
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
             SensorSelector.SelectCpuTemperature(
             [new SensorReading("Motherboard", 55), new SensorReading("CPU Package", float.PositiveInfinity)]));
+
+        Assert.Contains("Motherboard", error.Message);
+        Assert.Contains("CPU Package", error.Message);
     }
 }

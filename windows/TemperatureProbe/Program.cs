@@ -24,7 +24,8 @@ public static class SensorSelector
 {
     public static float SelectCpuTemperature(IEnumerable<SensorReading> readings)
     {
-        SensorReading[] valid = readings
+        SensorReading[] available = readings.ToArray();
+        SensorReading[] valid = available
             .Where(reading => reading.Value is float value &&
                               float.IsFinite(value) && value >= 0 && value <= 125)
             .ToArray();
@@ -34,12 +35,22 @@ public static class SensorSelector
         if (package is not null)
             return package.Value!.Value;
 
+        foreach (string amdName in new[] { "Core (Tdie)", "Core (Tctl/Tdie)", "Core (Tctl)" })
+        {
+            SensorReading? amdReading = valid.FirstOrDefault(reading =>
+                string.Equals(reading.Name, amdName, StringComparison.OrdinalIgnoreCase));
+            if (amdReading is not null)
+                return amdReading.Value!.Value;
+        }
+
         float[] cores = valid
             .Where(reading => reading.Name.StartsWith("CPU Core", StringComparison.OrdinalIgnoreCase))
             .Select(reading => reading.Value!.Value)
             .ToArray();
         if (cores.Length == 0)
-            throw new InvalidOperationException("No valid CPU temperature sensor was found");
+            throw new InvalidOperationException(
+                "No valid CPU temperature sensor was found. Available CPU temperature sensors: " +
+                (available.Length == 0 ? "none" : string.Join(", ", available.Select(reading => reading.Name))));
 
         return (float)cores.Average(value => (double)value);
     }
@@ -75,9 +86,9 @@ public static class Program
                 computer.Close();
             }
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            Console.Error.WriteLine("CPU temperature could not be read");
+            Console.Error.WriteLine($"CPU temperature could not be read: {exception.GetType().Name}: {exception.Message}");
             return 1;
         }
     }
