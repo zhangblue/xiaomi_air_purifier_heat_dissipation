@@ -150,10 +150,21 @@ class BundleTests(unittest.TestCase):
         for required in (
             "config.example.toml", "config.toml", ".secrets/purifier-token",
             "check", "run", "PawnIO", "same operating system", "same CPU architecture",
-            "unsigned", "does not restore", "GPL-2.0-only",
+            "unsigned", "does not restore", "GPL-2.0-only", "pbpaste", "Get-Clipboard",
         ):
             with self.subTest(required=required):
                 self.assertIn(required, guide)
+
+    def test_portable_target_setup_uses_native_token_commands(self):
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+            encoding="utf-8")
+        self.assertIn("### 目标机配置", readme)
+        target_steps = readme.split("### 目标机配置", 1)[1].split(
+            "## macOS 安装与运行", 1)[0]
+        self.assertIn("pbpaste > .secrets/purifier-token", target_steps)
+        self.assertIn("Get-Clipboard -Raw", target_steps)
+        self.assertNotIn("python -c", target_steps)
+        self.assertNotIn("python.exe", target_steps)
 
     def test_cli_uses_default_output_and_reports_success_path(self):
         output = StringIO()

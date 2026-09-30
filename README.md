@@ -26,7 +26,31 @@ py -3.11 -m venv .venv
 # 自选尚不存在的输出目录：.\.venv\Scripts\python.exe -m tools.build_bundle --output dist\my-pc
 ```
 
-默认输出分别为 `dist/macos-<架构>/`、`dist/windows-x64/`。成功时命令会打印包路径；现有输出目录不会被覆盖。将整个目录复制到目标机，在包内复制 `config.example.toml` 为 `config.toml`，修改 `[purifier].host`，并在包内创建 `.secrets/purifier-token`，只写入该设备的 32 位十六进制 token。**token 和私有配置不进入构建包**，也不要把 token 放入命令参数、截图或日志。macOS 可使用下文的无回显输入命令在包目录创建 token；Windows 可使用下文的 PowerShell 命令，并限制文件访问权限。
+默认输出分别为 `dist/macos-<架构>/`、`dist/windows-x64/`。成功时命令会打印包路径；现有输出目录不会被覆盖。将整个目录复制到目标机。**token 和私有配置不进入构建包**，也不要把 token 放入命令参数、截图或日志。
+
+### 目标机配置（无需 Python）
+
+先进入复制后的包目录，将 `config.example.toml` 复制为 `config.toml`，修改 `[purifier].host`。把该设备的 32 位十六进制 token 复制到目标机剪贴板，再按目标系统执行以下命令；不要直接在终端粘贴 token。命令将剪贴板内容写入目标机的 `.secrets/purifier-token`，随后清空剪贴板。
+
+```sh
+# macOS：在复制后的包目录中执行
+cp config.example.toml config.toml
+mkdir -p .secrets
+chmod 700 .secrets
+(umask 077; pbpaste > .secrets/purifier-token)
+pbcopy < /dev/null
+chmod 600 .secrets/purifier-token
+```
+
+```powershell
+# Windows PowerShell：在复制后的包目录中执行
+Copy-Item .\config.example.toml .\config.toml
+New-Item -ItemType Directory -Force .\.secrets | Out-Null
+Get-Clipboard -Raw | Set-Content -NoNewline -Encoding ascii .\.secrets\purifier-token
+Set-Clipboard -Value ''
+```
+
+Windows 请在文件属性的“安全”页确认 token 文件只对自己的账户可读。若剪贴板来源含多余换行，程序会在读取 token 时去掉首尾空白；`check` 会拒绝无效 token。
 
 在目标机先运行只读的 `check.command`（macOS）或 `check.cmd`（Windows），确认温度、型号和设备连接后，在场时手动运行 `run.command` 或 `run.cmd`。按 `Ctrl+C` 停止。程序停止后**不会恢复净化器原来的电源、模式或最爱档级别**，如有需要请自行恢复并确认。macOS 对未签名程序可能显示安全提示，需由电脑所有者在系统设置中批准运行。Windows 有些温度传感器仍需所有者单独安装 PawnIO 驱动；目录包不包含或安装该驱动，不应为此关闭系统安全保护。
 
