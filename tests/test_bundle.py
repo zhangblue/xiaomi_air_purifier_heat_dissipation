@@ -166,6 +166,17 @@ class BundleTests(unittest.TestCase):
         self.assertNotIn("python -c", target_steps)
         self.assertNotIn("python.exe", target_steps)
 
+    def test_readme_documents_verified_macos_bundle_architecture(self):
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+            encoding="utf-8")
+        bundle_section = readme.split("## 构建与迁移目录包", 1)[1].split(
+            "## macOS 安装与运行", 1)[0]
+        self.assertIn("目前只接受已核验的 macOS arm64 `smctemp` 0.7.0 构建产物",
+                      bundle_section)
+        self.assertIn("Homebrew 安装本身不保证命中白名单", bundle_section)
+        self.assertIn("其他架构或不同二进制需另行验证", bundle_section)
+        self.assertNotIn("macOS 为构建机原生架构", bundle_section)
+
     def test_cli_uses_default_output_and_reports_success_path(self):
         output = StringIO()
         with (patch("tools.build_bundle.sys.platform", "darwin"),

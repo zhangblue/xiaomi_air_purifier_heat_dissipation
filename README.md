@@ -6,9 +6,9 @@
 
 ## 构建与迁移目录包
 
-目录包可复制到另一台**同操作系统、同 CPU 架构**的电脑，目标机无需另装 Python、Python 包、.NET Runtime 或 `smctemp`。macOS 与 Windows 要分别在对应系统上构建，不能跨系统或跨架构构建；较新系统构建的包也不保证兼容较旧系统。首版 Windows 构建目标为 x64，macOS 为构建机原生架构。目标机仍须能读取 CPU 温度，并能通过局域网访问净化器。目录包不提供自动启动。
+目录包可复制到另一台**同操作系统、同 CPU 架构**的电脑，目标机无需另装 Python、Python 包、.NET Runtime 或 `smctemp`。macOS 与 Windows 要分别在对应系统上构建，不能跨系统或跨架构构建；较新系统构建的包也不保证兼容较旧系统。首版 Windows 构建目标为 x64；macOS 目前只接受已核验的 macOS arm64 `smctemp` 0.7.0 构建产物。其他架构或不同二进制需另行验证；Homebrew 安装本身不保证命中白名单。目标机仍须能读取 CPU 温度，并能通过局域网访问净化器。目录包不提供自动启动。
 
-在项目根目录准备构建机。macOS 需 Python 3.11、Homebrew 安装的 `narugit/tap/smctemp`；构建器会核对其二进制、来源归档、许可证材料及系统依赖，核对失败就停止构建。Windows 需 Python 3.11 和 .NET 8 SDK。两边均须安装项目的打包依赖：
+在项目根目录准备构建机。macOS 需 arm64 构建机、Python 3.11 和 Homebrew 安装的 `narugit/tap/smctemp`。构建器仅接受已核验的 arm64 `smctemp` 0.7.0 二进制，并核对其来源归档、许可证材料及系统依赖；Homebrew 安装本身不保证命中白名单，核对失败就停止构建。其他架构或不同二进制需另行验证。Windows 需 Python 3.11 和 .NET 8 SDK。两边均须安装项目的打包依赖：
 
 ```sh
 # macOS
