@@ -53,15 +53,17 @@ class Runner:
         new_level = self.policy.observe(temperature, now)
         if new_level is not None:
             self.desired_level = new_level
-            if self.desired_level != self._blocked_level:
+            if self._started and self.desired_level != self._blocked_level:
                 self._blocked_level = None
 
-        if self.desired_level == self._blocked_level:
+        if self._blocked_level is not None and (
+                not self._started or self.desired_level == self._blocked_level):
             return
 
         if now < self._next_device_attempt:
             return
 
+        attempted_level = self.desired_level
         try:
             if not self._model_verified:
                 self.purifier.verify_model()
@@ -69,10 +71,12 @@ class Runner:
             if not self._started:
                 self.purifier.read_status()
                 low_level = self.policy.config.low_favorite_level
+                attempted_level = low_level
                 self.purifier.start(low_level)
                 self._started = True
                 self.log.info("Purifier set to Favorite level %d", low_level)
                 if self.desired_level != low_level:
+                    attempted_level = self.desired_level
                     self.purifier.set_level(self.desired_level)
                     self.log.info("Purifier set to Favorite level %d", self.desired_level)
             elif not self._connected:
@@ -84,9 +88,9 @@ class Runner:
         except PurifierModelMismatch:
             raise
         except PurifierLevelRejected:
-            self._blocked_level = self.desired_level
+            self._blocked_level = attempted_level
             self.log.error("Purifier rejected Favorite level %d; verify configured level",
-                           self.desired_level)
+                           attempted_level)
             return
         except PurifierError:
             if self._connected:

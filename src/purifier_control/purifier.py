@@ -15,6 +15,10 @@ class PurifierLevelRejected(PurifierError):
 class PurifierModelMismatch(PurifierError):
     """The connected device is not the configured purifier model."""
 
+    def __init__(self, reported_model: str):
+        super().__init__("Purifier model does not match expected model")
+        self.reported_model = reported_model
+
 
 class MiioPurifier:
     """Apply and verify Favorite mode commands on a single purifier."""
@@ -32,8 +36,10 @@ class MiioPurifier:
             model = info.model
         except Exception:
             raise PurifierError("Could not read purifier model") from None
+        if not isinstance(model, str):
+            raise PurifierError("Could not read purifier model")
         if model != self._expected_model:
-            raise PurifierModelMismatch("Purifier model does not match expected model")
+            raise PurifierModelMismatch(model)
         return info
 
     @classmethod

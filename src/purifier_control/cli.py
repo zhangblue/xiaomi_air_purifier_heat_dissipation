@@ -9,7 +9,7 @@ from pathlib import Path
 
 from purifier_control.config import AppConfig, load_config
 from purifier_control.policy import TemperaturePolicy
-from purifier_control.purifier import MiioPurifier, PurifierError
+from purifier_control.purifier import MiioPurifier, PurifierError, PurifierModelMismatch
 from purifier_control.runner import Runner
 from purifier_control.sensors import (MacOSTemperatureSource, SensorError,
                                       WindowsTemperatureSource)
@@ -52,6 +52,11 @@ def main(argv: list[str] | None = None) -> int:
                 purifier = make_purifier(config, verify=False)
                 info = purifier.verify_model()
                 purifier.read_status()
+            except PurifierModelMismatch as mismatch:
+                print(f"Internal model: {mismatch.reported_model}")
+                print("Connection: connected")
+                print("Model verification: mismatch")
+                return 1
             except PurifierError:
                 print(f"Internal model: {info.model if info is not None else 'unavailable'}")
                 print("Connection: disconnected")

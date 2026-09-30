@@ -8,7 +8,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
-from purifier_control.purifier import MiioPurifier, PurifierError, PurifierLevelRejected
+from purifier_control.purifier import (MiioPurifier, PurifierError,
+                                      PurifierLevelRejected, PurifierModelMismatch)
 
 
 MODEL = "zhimi.airpurifier.v6"
@@ -79,8 +80,9 @@ class MiioPurifierTests(unittest.TestCase):
 
     def test_wrong_model_rejects_without_writing_commands(self):
         device = FakeDevice(model="zhimi.airpurifier.v7")
-        with self.assertRaisesRegex(PurifierError, "model"):
+        with self.assertRaisesRegex(PurifierModelMismatch, "model") as caught:
             MiioPurifier(device, expected_model=MODEL)
+        self.assertEqual(caught.exception.reported_model, "zhimi.airpurifier.v7")
         self.assertEqual(device.calls, ["info"])
 
     def test_start_writes_in_order_then_confirms_status(self):

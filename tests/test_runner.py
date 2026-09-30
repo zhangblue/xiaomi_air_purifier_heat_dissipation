@@ -46,6 +46,7 @@ class FakePurifier:
         self.fail_reads = 0
         self.fail_writes = 0
         self.reject_level = None
+        self.reject_start_level = None
         self.fail_info = 0
 
     def verify_model(self):
@@ -69,6 +70,8 @@ class FakePurifier:
 
     def start(self, level):
         self.calls.append(("start", level))
+        if level == self.reject_start_level:
+            raise PurifierLevelRejected("secret-token")
         if self.fail_writes:
             self.fail_writes -= 1
             raise PurifierError("unavailable")
@@ -248,6 +251,28 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual([call for call in purifier.calls if call == ("level", 17)],
                          [("level", 17)])
 
+    def test_rejected_startup_low_is_reported_as_low_and_not_retried(self):
+        sensor = FakeSensor([61.0] * 10)
+        purifier = FakePurifier()
+        purifier.fail_info = 2
+        purifier.reject_start_level = 3
+        subject = runner(sensor, purifier)
+        events = io.StringIO()
+        handler = logging.StreamHandler(events)
+        subject.log.addHandler(handler)
+        try:
+            for now in range(0, 50, 5):
+                subject.tick(float(now))
+        finally:
+            subject.log.removeHandler(handler)
+
+        self.assertEqual(subject.desired_level, 17)
+        self.assertEqual([call for call in purifier.calls if isinstance(call, tuple)],
+                         [("start", 3)])
+        self.assertIn("rejected Favorite level 3", events.getvalue())
+        self.assertNotIn("rejected Favorite level 17", events.getvalue())
+        self.assertNotIn("secret-token", events.getvalue())
+
     def test_run_samples_at_configured_interval_and_interrupt_does_not_power_off(self):
         clock = FakeClock()
         clock.interrupt_at = 15.0
@@ -264,6 +289,24 @@ class RunnerTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_check_reports_reachable_wrong_model_accurately(self):
+        sensor = FakeSensor([42.5])
+        device = FakeDevice(model="zhimi.airpurifier.v7")
+        purifier = MiioPurifier(device, expected_model="zhimi.airpurifier.v6",
+                                verify=False)
+        output = io.StringIO()
+        with (patch("purifier_control.cli.load_config", return_value=CONFIG),
+              patch("purifier_control.cli.make_sensor", return_value=sensor),
+              patch("purifier_control.cli.make_purifier", return_value=purifier),
+              patch("sys.stdout", output)):
+            code = main(["--config", "unused.toml", "check"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("Internal model: zhimi.airpurifier.v7", output.getvalue())
+        self.assertIn("Connection: connected", output.getvalue())
+        self.assertIn("Model verification: mismatch", output.getvalue())
+        self.assertEqual(device.calls, ["info"])
+
     def test_run_constructs_adapter_without_initial_network_read(self):
         sensor = FakeSensor([42.5])
         purifier = FakePurifier()
