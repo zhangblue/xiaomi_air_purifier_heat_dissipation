@@ -8,7 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
-from purifier_control.purifier import MiioPurifier, PurifierError
+from purifier_control.purifier import MiioPurifier, PurifierError, PurifierLevelRejected
 
 
 MODEL = "zhimi.airpurifier.v6"
@@ -59,6 +59,24 @@ class FakeDevice:
 
 
 class MiioPurifierTests(unittest.TestCase):
+    def test_public_reads_return_device_data_without_control_commands(self):
+        device = FakeDevice()
+        adapter = MiioPurifier(device, expected_model=MODEL)
+        device.calls.clear()
+
+        self.assertEqual(adapter.read_info().model, MODEL)
+        self.assertFalse(adapter.read_status().is_on)
+        self.assertEqual(device.calls, ["info", "status"])
+
+    def test_public_read_failure_is_sanitized(self):
+        device = FakeDevice()
+        adapter = MiioPurifier(device, expected_model=MODEL)
+        device.fail_on = "status"
+
+        with self.assertRaises(PurifierError) as caught:
+            adapter.read_status()
+        self.assertNotIn(TOKEN, str(caught.exception))
+
     def test_wrong_model_rejects_without_writing_commands(self):
         device = FakeDevice(model="zhimi.airpurifier.v7")
         with self.assertRaisesRegex(PurifierError, "model"):
@@ -107,9 +125,17 @@ class MiioPurifierTests(unittest.TestCase):
         device.reported_level = 3
         device.calls.clear()
 
-        with self.assertRaises(PurifierError):
+        with self.assertRaises(PurifierLevelRejected):
             adapter.set_level(17)
         self.assertEqual(device.calls, [("level", 17), "status"])
+
+    def test_explicit_false_level_response_is_rejection(self):
+        device = FakeDevice()
+        adapter = MiioPurifier(device, expected_model=MODEL)
+        device.set_favorite_level = lambda level: False
+
+        with self.assertRaises(PurifierLevelRejected):
+            adapter.set_level(17)
 
     def test_library_failures_never_claim_success_or_reveal_token(self):
         for failure in ("info", "on", ("level", 3),

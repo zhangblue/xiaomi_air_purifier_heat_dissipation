@@ -8,5 +8,8 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = ["python-miio==0.5.12"]
 
+[project.scripts]
+purifier-control = "purifier_control.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]

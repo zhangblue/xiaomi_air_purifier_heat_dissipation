@@ -8,6 +8,10 @@ class PurifierError(RuntimeError):
     """The purifier could not be controlled or did not confirm the target state."""
 
 
+class PurifierLevelRejected(PurifierError):
+    """The purifier explicitly declined or did not confirm a Favorite level."""
+
+
 class MiioPurifier:
     """Apply and verify Favorite mode commands on a single purifier."""
 
@@ -38,25 +42,37 @@ class MiioPurifier:
             raise PurifierError(f"Could not {action}") from None
 
     def _readback(self, level: int):
-        status = self._call("read purifier status", self._device.status)
+        status = self.read_status()
         try:
-            confirmed = (status.is_on and status.mode == OperationMode.Favorite
-                         and status.favorite_level == level)
+            powered_and_favorite = status.is_on and status.mode == OperationMode.Favorite
+            actual_level = status.favorite_level
         except Exception:
             raise PurifierError("Could not interpret purifier status") from None
-        if not confirmed:
+        if not powered_and_favorite:
             raise PurifierError("Purifier did not confirm Favorite mode and level")
+        if actual_level != level:
+            raise PurifierLevelRejected("Purifier did not confirm Favorite level")
         return status
+
+    def read_info(self):
+        """Read device information without changing purifier state."""
+        return self._call("read device information", self._device.info)
+
+    def read_status(self):
+        """Read the current purifier state without sending control commands."""
+        return self._call("read purifier status", self._device.status)
 
     def start(self, level: int):
         """Power on, set the Favorite level and mode, then verify the result."""
         self._call("power on purifier", self._device.on)
-        self._call("set Favorite level", self._device.set_favorite_level, level)
+        if self._call("set Favorite level", self._device.set_favorite_level, level) is False:
+            raise PurifierLevelRejected("Purifier rejected Favorite level")
         self._call("set Favorite mode", self._device.set_mode,
                    OperationMode.Favorite)
         return self._readback(level)
 
     def set_level(self, level: int):
         """Change only the Favorite level, then verify power, mode and level."""
-        self._call("set Favorite level", self._device.set_favorite_level, level)
+        if self._call("set Favorite level", self._device.set_favorite_level, level) is False:
+            raise PurifierLevelRejected("Purifier rejected Favorite level")
         return self._readback(level)
