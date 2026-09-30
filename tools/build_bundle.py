@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import platform as platform_module
 import re
 import shutil
@@ -29,6 +31,15 @@ PUBLIC_TEMPLATE = (
     'low_favorite_level = 3\n'
 )
 PUBLIC_DEFAULTS = tomllib.loads(PUBLIC_TEMPLATE)
+SMCTEMP_VERSION = "0.7.0"
+SMCTEMP_SOURCE_URL = "https://github.com/narugit/smctemp/archive/refs/tags/0.7.0.tar.gz"
+SMCTEMP_SOURCE_SHA256 = "4ca4eaade1964f2d4d39c5fc21ccb357a1966c5c2b8bb1480b08a28d47f8d4dd"
+SMCTEMP_LICENSE_SHA256 = "ab15fd526bd8dd18a9e77ebc139656bf4d33e97fc7238cd11bf60e2b9b8666c6"
+# The arm64 binary was built from the pinned Homebrew source on the verified build host.
+# Other build architectures or binary revisions require a separate provenance review.
+SMCTEMP_BINARY_SHA256 = {
+    "arm64": "80c81fe8a5f66a9b4b27de09b376930ca1b940230c29fcbc9d89f1e38d520487",
+}
 
 
 def _validated_template(source: Path, target_platform: str) -> str:
@@ -72,6 +83,14 @@ def _launcher(target_platform: str, command: str) -> str:
             f'"$BUNDLE_DIR/config.toml" {command}\n')
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _collect_macos_probe(bin_dir: Path, run_command: Callable[[list[str]], str | None]) -> None:
     located = shutil.which("smctemp")
     if located is None:
@@ -79,9 +98,52 @@ def _collect_macos_probe(bin_dir: Path, run_command: Callable[[list[str]], str |
     executable = Path(located).resolve()
     if not executable.is_file():
         raise RuntimeError("smctemp executable is missing")
-    license_file = executable.parent.parent / "LICENSE"
-    if not license_file.is_file() or not license_file.read_bytes().strip():
-        raise RuntimeError("smctemp license material is missing")
+    keg = executable.parent.parent
+    if (executable.parent.name != "bin" or executable.name != "smctemp" or
+            keg.name != SMCTEMP_VERSION or keg.parent.name != "smctemp" or
+            keg.parent.parent.name != "Cellar"):
+        raise RuntimeError("unverified smctemp binary location")
+    expected_binary_hash = SMCTEMP_BINARY_SHA256.get(platform_module.machine())
+    if expected_binary_hash is None or _sha256(executable) != expected_binary_hash:
+        raise RuntimeError("unverified smctemp binary")
+    if run_command([str(executable), "-v"]) != f"{SMCTEMP_VERSION}\n":
+        raise RuntimeError("unverified smctemp binary version")
+
+    try:
+        receipt = json.loads((keg / "INSTALL_RECEIPT.json").read_text(encoding="utf-8"))
+        source_record = receipt["source"]
+        receipt_ok = (source_record["tap"] == "narugit/tap" and
+                      source_record["versions"]["stable"] == SMCTEMP_VERSION and
+                      receipt["arch"] == platform_module.machine() and
+                      receipt["built_as_bottle"] is False and
+                      receipt["poured_from_bottle"] is False)
+    except (OSError, ValueError, KeyError, TypeError):
+        receipt_ok = False
+    if not receipt_ok:
+        raise RuntimeError("unverified smctemp installation receipt")
+
+    try:
+        formula = (keg / ".brew" / "smctemp.rb").read_text(encoding="utf-8")
+    except OSError:
+        raise RuntimeError("smctemp source formula is missing") from None
+    fields = re.findall(r'^\s*(url|sha256|license)\s+"([^"]+)"\s*$', formula, re.MULTILINE)
+    if len(fields) != 3 or dict(fields) != {
+        "url": SMCTEMP_SOURCE_URL,
+        "sha256": SMCTEMP_SOURCE_SHA256,
+        "license": "GPL-2.0-only",
+    }:
+        raise RuntimeError("smctemp source formula is unverified")
+
+    license_file = keg / "LICENSE"
+    if not license_file.is_file() or _sha256(license_file) != SMCTEMP_LICENSE_SHA256:
+        raise RuntimeError("smctemp license material is missing or unverified")
+
+    source_cache = run_command(["brew", "--cache", "smctemp"])
+    if not isinstance(source_cache, str) or not source_cache.strip():
+        raise RuntimeError("smctemp source archive is missing")
+    archive = Path(source_cache.strip())
+    if not archive.is_file() or _sha256(archive) != SMCTEMP_SOURCE_SHA256:
+        raise RuntimeError("smctemp source archive is missing or unverified")
 
     linkage = run_command(["otool", "-L", str(executable)])
     if not isinstance(linkage, str):
@@ -96,6 +158,7 @@ def _collect_macos_probe(bin_dir: Path, run_command: Callable[[list[str]], str |
 
     shutil.copy2(executable, bin_dir / "smctemp")
     shutil.copy2(license_file, bin_dir / "LICENSE.smctemp")
+    shutil.copy2(archive, bin_dir / "smctemp-0.7.0-source.tar.gz")
 
 
 def build_bundle(
@@ -152,6 +215,8 @@ def build_bundle(
             "Portable purifier-control bundle\n\n"
             "Copy config.example.toml to config.toml and set the purifier IP.\n"
             "Create .secrets/purifier-token with your own device token.\n"
+            "macOS: smctemp GPL-2.0-only license and version 0.7.0 source "
+            "archive are in bin/.\n"
             "Run check first; it reads status without changing the device.\n"
             "Run run only while present. Stop with Ctrl+C.\n"
             "Stopping does not restore the purifier's previous state.\n",

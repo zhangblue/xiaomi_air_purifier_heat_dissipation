@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import platform as platform_module
 import sys
 import tempfile
@@ -47,11 +49,38 @@ class BundleTests(unittest.TestCase):
         (secrets / "purifier-token").write_text(FAKE_TOKEN, encoding="ascii")
         self.output = self.root / "dist" / "bundle"
         self.output.parent.mkdir()
-        keg = self.root / "smctemp-keg"
+        keg = self.root / "Cellar" / "smctemp" / "0.7.0"
         (keg / "bin").mkdir(parents=True)
         self.smctemp = keg / "bin" / "smctemp"
         self.smctemp.write_text("fake smctemp", encoding="utf-8")
         (keg / "LICENSE").write_text("redistribution allowed", encoding="utf-8")
+        (keg / ".brew").mkdir()
+        (keg / "INSTALL_RECEIPT.json").write_text(json.dumps({
+            "built_as_bottle": False,
+            "poured_from_bottle": False,
+            "source": {"tap": "narugit/tap", "versions": {"stable": "0.7.0"}},
+            "arch": platform_module.machine(),
+        }), encoding="utf-8")
+        self.source_archive = self.root / "smctemp-0.7.0.tar.gz"
+        self.source_archive.write_bytes(b"fixture smctemp source archive")
+        source_hash = hashlib.sha256(self.source_archive.read_bytes()).hexdigest()
+        binary_hash = hashlib.sha256(self.smctemp.read_bytes()).hexdigest()
+        (keg / ".brew" / "smctemp.rb").write_text(
+            'url "https://github.com/narugit/smctemp/archive/refs/tags/0.7.0.tar.gz"\n'
+            f'sha256 "{source_hash}"\nlicense "GPL-2.0-only"\n', encoding="utf-8")
+        source_patch = patch("tools.build_bundle.SMCTEMP_SOURCE_SHA256", source_hash,
+                             create=True)
+        source_patch.start()
+        self.addCleanup(source_patch.stop)
+        binary_patch = patch("tools.build_bundle.SMCTEMP_BINARY_SHA256",
+                             {platform_module.machine(): binary_hash}, create=True)
+        binary_patch.start()
+        self.addCleanup(binary_patch.stop)
+        license_patch = patch("tools.build_bundle.SMCTEMP_LICENSE_SHA256",
+                              hashlib.sha256((keg / "LICENSE").read_bytes()).hexdigest(),
+                              create=True)
+        license_patch.start()
+        self.addCleanup(license_patch.stop)
         which_patch = patch("shutil.which", return_value=str(self.smctemp))
         which_patch.start()
         self.addCleanup(which_patch.stop)
@@ -65,6 +94,10 @@ class BundleTests(unittest.TestCase):
                     "(compatibility version 1.0.0, current version 1.0.0)\n"
                     "\t/usr/lib/libSystem.B.dylib "
                     "(compatibility version 1.0.0, current version 1.0.0)\n")
+        if args == ["brew", "--cache", "smctemp"]:
+            return str(self.source_archive) + "\n"
+        if len(args) == 2 and Path(args[0]) == self.smctemp.resolve() and args[1] == "-v":
+            return "0.7.0\n"
         if args[:3] == [sys.executable, "-m", "PyInstaller"]:
             dist = Path(args[args.index("--distpath") + 1])
             app = dist / "purifier-control" / "purifier-control"
@@ -85,6 +118,7 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(
             {str(path.relative_to(result)) for path in result.rglob("*")},
             {"app", "app/purifier-control", "bin", "bin/smctemp", "bin/LICENSE.smctemp",
+             "bin/smctemp-0.7.0-source.tar.gz",
              "config.example.toml",
              "check.command", "run.command", "README.txt"},
         )
@@ -114,6 +148,8 @@ class BundleTests(unittest.TestCase):
                          "fake smctemp")
         self.assertEqual((result / "bin" / "LICENSE.smctemp").read_text(encoding="utf-8"),
                          "redistribution allowed")
+        self.assertEqual((result / "bin" / "smctemp-0.7.0-source.tar.gz").read_bytes(),
+                         b"fixture smctemp source archive")
         launcher = (result / "check.command").read_text(encoding="utf-8")
         self.assertIn('PATH="$BUNDLE_DIR/bin:$PATH" "$BUNDLE_DIR/app/purifier-control"', launcher)
         self.assertNotIn("export PATH", launcher)
@@ -130,8 +166,41 @@ class BundleTests(unittest.TestCase):
                              run_command=run)
         self.assertFalse(self.output.exists())
 
+    def test_macos_rejects_missing_verified_smctemp_source(self):
+        self.source_archive.unlink()
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaisesRegex(RuntimeError, "source archive"):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+
+    def test_macos_rejects_modified_smctemp_source(self):
+        self.source_archive.write_bytes(b"different source")
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaisesRegex(RuntimeError, "source archive"):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+
+    def test_macos_rejects_unknown_smctemp_binary(self):
+        self.smctemp.write_bytes(b"unknown binary")
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaisesRegex(RuntimeError, "unverified smctemp binary"):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+
     def test_macos_rejects_missing_smctemp_license(self):
         (self.smctemp.parent.parent / "LICENSE").unlink()
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaisesRegex(RuntimeError, "license"):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+
+    def test_macos_rejects_altered_smctemp_license(self):
+        (self.smctemp.parent.parent / "LICENSE").write_text("unrelated license",
+                                                              encoding="utf-8")
         with patch("tools.build_bundle.sys.platform", "darwin"):
             with self.assertRaisesRegex(RuntimeError, "license"):
                 build_bundle(self.source, self.output, "macos", platform_module.machine(),
