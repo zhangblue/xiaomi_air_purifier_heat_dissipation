@@ -35,9 +35,17 @@ class Runner:
         self._failures = 0
         self._sensor_failed = False
         self._blocked_level: int | None = None
+        self._last_sample_at: float | None = None
+        self._needs_reconcile = False
 
     def tick(self, now: float) -> None:
         """Take one sample and attempt any due device reconciliation."""
+        if (self._last_sample_at is not None
+                and now - self._last_sample_at > 2 * self.sample_interval_seconds):
+            self.policy.observe(None, now)
+            if self._started:
+                self._needs_reconcile = True
+        self._last_sample_at = now
         try:
             temperature = self.sensor.read()
         except SensorError:
@@ -57,7 +65,8 @@ class Runner:
                 self._blocked_level = None
 
         if self._blocked_level is not None and (
-                not self._started or self.desired_level == self._blocked_level):
+                not self._started or self.desired_level == self._blocked_level
+                ) and not self._needs_reconcile:
             return
 
         if now < self._next_device_attempt:
@@ -79,9 +88,10 @@ class Runner:
                     attempted_level = self.desired_level
                     self.purifier.set_level(self.desired_level)
                     self.log.info("Purifier set to Favorite level %d", self.desired_level)
-            elif not self._connected:
+            elif not self._connected or self._needs_reconcile:
                 status = self.purifier.read_status()
-                self._reconcile(status)
+                if self.desired_level != self._blocked_level:
+                    self._reconcile(status)
             elif new_level is not None:
                 self.purifier.set_level(self.desired_level)
                 self.log.info("Purifier set to Favorite level %d", self.desired_level)
@@ -89,6 +99,7 @@ class Runner:
             raise
         except PurifierLevelRejected:
             self._blocked_level = attempted_level
+            self._needs_reconcile = False
             self.log.error("Purifier rejected Favorite level %d; verify configured level",
                            attempted_level)
             return
@@ -103,6 +114,7 @@ class Runner:
         if not self._connected:
             self.log.info("Purifier connection recovered")
         self._connected = True
+        self._needs_reconcile = False
         self._failures = 0
         self._next_device_attempt = now
 

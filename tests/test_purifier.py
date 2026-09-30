@@ -8,6 +8,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
+from miio.exceptions import DeviceError, DeviceException
 from purifier_control.purifier import (MiioPurifier, PurifierError,
                                       PurifierLevelRejected, PurifierModelMismatch)
 
@@ -150,6 +151,35 @@ class MiioPurifierTests(unittest.TestCase):
 
         with self.assertRaises(PurifierLevelRejected):
             adapter.set_level(17)
+
+    def test_device_error_rejects_level_without_exposing_response(self):
+        device = FakeDevice()
+        adapter = MiioPurifier(device, expected_model=MODEL)
+        adapter.start(3)
+        device.calls.clear()
+
+        def rejected(level):
+            device.calls.append(("level", level))
+            raise DeviceError({"code": -1, "message": TOKEN})
+
+        device.set_favorite_level = rejected
+        with self.assertRaises(PurifierLevelRejected) as caught:
+            adapter.set_level(17)
+        self.assertNotIn(TOKEN, str(caught.exception))
+        self.assertEqual(device.calls, [("level", 17)])
+
+    def test_transport_exception_is_not_a_level_rejection(self):
+        device = FakeDevice()
+        adapter = MiioPurifier(device, expected_model=MODEL)
+
+        def unavailable(level):
+            raise DeviceException(TOKEN)
+
+        device.set_favorite_level = unavailable
+        with self.assertRaises(PurifierError) as caught:
+            adapter.set_level(17)
+        self.assertNotIsInstance(caught.exception, PurifierLevelRejected)
+        self.assertNotIn(TOKEN, str(caught.exception))
 
     def test_library_failures_never_claim_success_or_reveal_token(self):
         for failure in ("info", "on", ("level", 3),

@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
+from miio.exceptions import DeviceError
 from purifier_control.config import AppConfig, ControlConfig, PurifierConfig, SystemConfig
 from purifier_control.policy import TemperaturePolicy
 from purifier_control.purifier import MiioPurifier, PurifierError, PurifierLevelRejected
@@ -118,6 +119,76 @@ def runner(sensor, purifier, clock=None):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_sleep_gap_restarts_high_temperature_duration(self):
+        sensor = FakeSensor([61.0] * 6)
+        purifier = FakePurifier()
+        clock = FakeClock()
+        subject = runner(sensor, purifier, clock)
+
+        for now in (0.0, 5.0, 20.0, 25.0, 30.0, 35.0):
+            clock.now = now
+            subject.tick(clock.monotonic())
+            if now < 35.0:
+                self.assertEqual(purifier.level, 3)
+
+        self.assertEqual(purifier.level, 17)
+        self.assertEqual([call for call in purifier.calls if call == ("level", 17)],
+                         [("level", 17)])
+
+    def test_sleep_gap_restarts_low_temperature_duration(self):
+        sensor = FakeSensor([61.0] * 4 + [54.0] * 26)
+        purifier = FakePurifier()
+        clock = FakeClock()
+        subject = runner(sensor, purifier, clock)
+
+        for now in (0.0, 5.0, 10.0, 15.0, 20.0, *range(200, 325, 5)):
+            clock.now = now
+            subject.tick(clock.monotonic())
+            if now < 320.0 and now >= 15.0:
+                self.assertEqual(purifier.level, 17)
+
+        self.assertEqual(purifier.level, 3)
+        self.assertEqual([call for call in purifier.calls if call == ("level", 3)],
+                         [("level", 3)])
+
+    def test_sleep_gap_reads_and_reconciles_manual_device_change(self):
+        sensor = FakeSensor([57.0, 57.0, 57.0])
+        purifier = FakePurifier()
+        clock = FakeClock()
+        subject = runner(sensor, purifier, clock)
+        for now in (0.0, 5.0):
+            clock.now = now
+            subject.tick(clock.monotonic())
+
+        purifier.mode = OperationMode.Auto
+        purifier.level = 1
+        purifier.calls.clear()
+        clock.now = 100.0
+        subject.tick(clock.monotonic())
+
+        self.assertEqual(purifier.calls, ["status", ("start", 3), "status"])
+        self.assertEqual(purifier.level, 3)
+        self.assertEqual(purifier.mode, OperationMode.Favorite)
+
+    def test_real_device_rejection_does_not_retry_same_level(self):
+        sensor = FakeSensor([61.0] * 8)
+        device = FakeDevice()
+        purifier = MiioPurifier(device, expected_model="zhimi.airpurifier.v6")
+
+        def rejected(level):
+            device.calls.append(("level", level))
+            if level == 17:
+                raise DeviceError({"code": -1, "message": "secret-token"})
+            device.favorite_level = level
+
+        device.set_favorite_level = rejected
+        subject = runner(sensor, purifier)
+        for now in range(0, 40, 5):
+            subject.tick(float(now))
+
+        self.assertEqual(device.calls.count(("level", 17)), 1)
+        self.assertEqual(device.favorite_level, 3)
+
     def test_start_low_then_switches_once_after_each_duration(self):
         sensor = FakeSensor([61.0] * 5 + [54.0] * 26)
         purifier = FakePurifier()
@@ -289,6 +360,34 @@ class RunnerTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_check_config_error_names_field_without_leaking_value(self):
+        for field in ("high_duration_seconds", "high_favorite_level"):
+            with self.subTest(field=field):
+                output = io.StringIO()
+                with (patch("purifier_control.cli.load_config",
+                            side_effect=ValueError(f"secret-token: {field} invalid")),
+                      patch("sys.stdout", output)):
+                    code = main(["--config", "unused.toml", "check"])
+
+                self.assertEqual(code, 1)
+                self.assertIn("Check failed", output.getvalue())
+                self.assertIn(f"configuration field {field}", output.getvalue())
+                self.assertNotIn("secret-token", output.getvalue())
+
+    def test_run_setup_error_uses_run_label_and_safe_category(self):
+        output = io.StringIO()
+        with (patch("purifier_control.cli.load_config", return_value=CONFIG),
+              patch("purifier_control.cli.make_sensor", return_value=FakeSensor([42.5])),
+              patch("purifier_control.cli.make_purifier",
+                    side_effect=PurifierError("secret-token")),
+              patch("sys.stdout", output)):
+            code = main(["--config", "unused.toml", "run"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("Run failed", output.getvalue())
+        self.assertIn("purifier", output.getvalue().lower())
+        self.assertNotIn("secret-token", output.getvalue())
+
     def test_check_reports_reachable_wrong_model_accurately(self):
         sensor = FakeSensor([42.5])
         device = FakeDevice(model="zhimi.airpurifier.v7")

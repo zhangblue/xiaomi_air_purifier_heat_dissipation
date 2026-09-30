@@ -1,6 +1,7 @@
 """Local-network control for the confirmed Xiaomi Air Purifier Pro model."""
 
 import miio
+from miio.exceptions import DeviceError
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
 
 
@@ -72,6 +73,16 @@ class MiioPurifier:
             raise PurifierError("Purifier did not yet confirm Favorite level")
         return status
 
+    def _set_favorite_level(self, level: int) -> None:
+        try:
+            response = self._device.set_favorite_level(level)
+        except DeviceError:
+            raise PurifierLevelRejected("Purifier rejected Favorite level") from None
+        except Exception:
+            raise PurifierError("Could not set Favorite level") from None
+        if response is False:
+            raise PurifierLevelRejected("Purifier rejected Favorite level")
+
     def read_info(self):
         """Read device information without changing purifier state."""
         return self._call("read device information", self._device.info)
@@ -83,14 +94,12 @@ class MiioPurifier:
     def start(self, level: int):
         """Power on, set the Favorite level and mode, then verify the result."""
         self._call("power on purifier", self._device.on)
-        if self._call("set Favorite level", self._device.set_favorite_level, level) is False:
-            raise PurifierLevelRejected("Purifier rejected Favorite level")
+        self._set_favorite_level(level)
         self._call("set Favorite mode", self._device.set_mode,
                    OperationMode.Favorite)
         return self._readback(level)
 
     def set_level(self, level: int):
         """Change only the Favorite level, then verify power, mode and level."""
-        if self._call("set Favorite level", self._device.set_favorite_level, level) is False:
-            raise PurifierLevelRejected("Purifier rejected Favorite level")
+        self._set_favorite_level(level)
         return self._readback(level)

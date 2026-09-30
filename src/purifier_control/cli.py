@@ -16,6 +16,12 @@ from purifier_control.sensors import (MacOSTemperatureSource, SensorError,
 
 
 EXPECTED_MODEL = "zhimi.airpurifier.v6"
+CONFIG_FIELDS = (
+    "platform", "host", "token_file", "temperature_sensor",
+    "sample_interval_seconds", "high_temperature_c", "high_duration_seconds",
+    "recover_temperature_c", "recover_duration_seconds",
+    "high_favorite_level", "low_favorite_level", "favorite_level",
+)
 
 
 def make_sensor(config: AppConfig):
@@ -39,10 +45,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("command", choices=("check", "run"))
     args = parser.parse_args(argv)
 
+    stage = "configuration"
     try:
         config = load_config(args.config)
+        stage = "sensor setup"
         sensor = make_sensor(config)
         if args.command == "check":
+            stage = "sensor reading"
             temperature = sensor.read()
             print(f"Platform: {config.platform}")
             print(f"CPU temperature: {temperature:.1f} C")
@@ -66,12 +75,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+        stage = "purifier connection"
         purifier = make_purifier(config, verify=False)
+        stage = "purifier control"
         Runner(sensor, purifier, TemperaturePolicy(config.control),
                sample_interval_seconds=config.system.sample_interval_seconds).run()
         return 0
-    except (ValueError, OSError, SensorError, PurifierError):
-        print("Check failed: configuration, sensor, or purifier is unavailable")
+    except (ValueError, OSError, SensorError, PurifierError) as exc:
+        label = "Check" if args.command == "check" else "Run"
+        if stage == "configuration" and isinstance(exc, ValueError):
+            field = next((name for name in CONFIG_FIELDS if name in str(exc)), None)
+            detail = f"configuration field {field}" if field else "configuration format"
+        else:
+            detail = stage
+        print(f"{label} failed: review {detail}")
         return 1
 
 
