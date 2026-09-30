@@ -1,0 +1,17 @@
+platform = "macos"
+
+[purifier]
+host = "192.168.250.118"
+token_file = ".secrets/purifier-token"
+
+[system]
+temperature_sensor = "cpu"
+sample_interval_seconds = 5
+
+[control]
+high_temperature_c = 70
+high_duration_seconds = 60
+recover_temperature_c = 60
+recover_duration_seconds = 120
+high_favorite_level = 17
+low_favorite_level = 3
