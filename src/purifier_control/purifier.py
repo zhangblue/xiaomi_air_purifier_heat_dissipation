@@ -9,30 +9,42 @@ class PurifierError(RuntimeError):
 
 
 class PurifierLevelRejected(PurifierError):
-    """The purifier explicitly declined or did not confirm a Favorite level."""
+    """The purifier explicitly declined a Favorite level command."""
+
+
+class PurifierModelMismatch(PurifierError):
+    """The connected device is not the configured purifier model."""
 
 
 class MiioPurifier:
     """Apply and verify Favorite mode commands on a single purifier."""
 
-    def __init__(self, device, *, expected_model: str):
+    def __init__(self, device, *, expected_model: str, verify: bool = True):
         self._device = device
-        info = self._call("read device information", device.info)
+        self._expected_model = expected_model
+        if verify:
+            self.verify_model()
+
+    def verify_model(self):
+        """Read and validate the device model without changing device state."""
+        info = self.read_info()
         try:
             model = info.model
         except Exception:
             raise PurifierError("Could not read purifier model") from None
-        if model != expected_model:
-            raise PurifierError("Purifier model does not match expected model")
+        if model != self._expected_model:
+            raise PurifierModelMismatch("Purifier model does not match expected model")
+        return info
 
     @classmethod
-    def from_host(cls, host: str, token: str, *, expected_model: str):
-        """Construct a real python-miio device and verify its reported model."""
+    def from_host(cls, host: str, token: str, *, expected_model: str,
+                  verify: bool = True):
+        """Construct a real device; optionally verify its reported model."""
         try:
             device = miio.AirPurifier(host, token)
         except Exception:
             raise PurifierError("Could not create purifier connection") from None
-        return cls(device, expected_model=expected_model)
+        return cls(device, expected_model=expected_model, verify=verify)
 
     @staticmethod
     def _call(action, method, *args):
@@ -51,7 +63,7 @@ class MiioPurifier:
         if not powered_and_favorite:
             raise PurifierError("Purifier did not confirm Favorite mode and level")
         if actual_level != level:
-            raise PurifierLevelRejected("Purifier did not confirm Favorite level")
+            raise PurifierError("Purifier did not yet confirm Favorite level")
         return status
 
     def read_info(self):

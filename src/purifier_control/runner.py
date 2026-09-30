@@ -9,7 +9,8 @@ from collections.abc import Callable
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
 
 from purifier_control.policy import TemperaturePolicy
-from purifier_control.purifier import PurifierError, PurifierLevelRejected
+from purifier_control.purifier import (PurifierError, PurifierLevelRejected,
+                                      PurifierModelMismatch)
 from purifier_control.sensors import SensorError, TemperatureSource
 
 
@@ -28,6 +29,7 @@ class Runner:
         self.log = logger or logging.getLogger(__name__)
         self.desired_level = policy.current_level
         self._started = False
+        self._model_verified = False
         self._connected = True
         self._next_device_attempt = 0.0
         self._failures = 0
@@ -61,17 +63,26 @@ class Runner:
             return
 
         try:
+            if not self._model_verified:
+                self.purifier.verify_model()
+                self._model_verified = True
             if not self._started:
                 self.purifier.read_status()
-                self.purifier.start(self.desired_level)
+                low_level = self.policy.config.low_favorite_level
+                self.purifier.start(low_level)
                 self._started = True
-                self.log.info("Purifier set to Favorite level %d", self.desired_level)
+                self.log.info("Purifier set to Favorite level %d", low_level)
+                if self.desired_level != low_level:
+                    self.purifier.set_level(self.desired_level)
+                    self.log.info("Purifier set to Favorite level %d", self.desired_level)
             elif not self._connected:
                 status = self.purifier.read_status()
                 self._reconcile(status)
             elif new_level is not None:
                 self.purifier.set_level(self.desired_level)
                 self.log.info("Purifier set to Favorite level %d", self.desired_level)
+        except PurifierModelMismatch:
+            raise
         except PurifierLevelRejected:
             self._blocked_level = self.desired_level
             self.log.error("Purifier rejected Favorite level %d; verify configured level",

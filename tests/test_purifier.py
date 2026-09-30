@@ -125,9 +125,21 @@ class MiioPurifierTests(unittest.TestCase):
         device.reported_level = 3
         device.calls.clear()
 
-        with self.assertRaises(PurifierLevelRejected):
+        with self.assertRaises(PurifierError) as caught:
             adapter.set_level(17)
+        self.assertNotIsInstance(caught.exception, PurifierLevelRejected)
         self.assertEqual(device.calls, [("level", 17), "status"])
+
+    def test_host_factory_can_defer_model_read_until_device_recovers(self):
+        device = FakeDevice(fail_on="info")
+        with patch("miio.AirPurifier", return_value=device):
+            adapter = MiioPurifier.from_host("192.0.2.10", TOKEN,
+                                             expected_model=MODEL, verify=False)
+        self.assertEqual(device.calls, [])
+        with self.assertRaises(PurifierError):
+            adapter.verify_model()
+        device.fail_on = None
+        self.assertEqual(adapter.verify_model().model, MODEL)
 
     def test_explicit_false_level_response_is_rejection(self):
         device = FakeDevice()

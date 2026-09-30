@@ -12,10 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from miio.integrations.airpurifier.zhimi.airpurifier import OperationMode
 from purifier_control.config import AppConfig, ControlConfig, PurifierConfig, SystemConfig
 from purifier_control.policy import TemperaturePolicy
-from purifier_control.purifier import PurifierError, PurifierLevelRejected
+from purifier_control.purifier import MiioPurifier, PurifierError, PurifierLevelRejected
 from purifier_control.sensors import SensorError
 from purifier_control.runner import Runner
 from purifier_control.cli import main
+from tests.test_purifier import FakeDevice
 
 
 CONTROL = ControlConfig(60.0, 15.0, 55.0, 120.0, 17, 3)
@@ -45,6 +46,14 @@ class FakePurifier:
         self.fail_reads = 0
         self.fail_writes = 0
         self.reject_level = None
+        self.fail_info = 0
+
+    def verify_model(self):
+        self.calls.append("info")
+        if self.fail_info:
+            self.fail_info -= 1
+            raise PurifierError("secret-token")
+        return SimpleNamespace(model="zhimi.airpurifier.v6")
 
     def read_info(self):
         self.calls.append("info")
@@ -142,9 +151,9 @@ class RunnerTests(unittest.TestCase):
             subject.tick(float(now))
 
         self.assertEqual([call for call in purifier.calls if call == "status"],
-                         ["status"] * 6)
+                         ["status"] * 7)
         self.assertEqual([call for call in purifier.calls if isinstance(call, tuple)],
-                         [("start", 17)])
+                         [("start", 3), ("level", 17)])
         self.assertEqual(subject.desired_level, 17)
 
     def test_failed_write_preserves_desired_level_until_readback(self):
@@ -179,6 +188,40 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(purifier.calls[-3:], ["status", ("level", 17), "status"])
         self.assertEqual(purifier.level, 17)
+
+    def test_offline_start_recovers_then_applies_low_before_pending_high(self):
+        sensor = FakeSensor([61.0] * 15)
+        purifier = FakePurifier()
+        purifier.fail_info = 4
+        subject = runner(sensor, purifier)
+
+        for now in range(0, 65, 5):
+            subject.tick(float(now))
+        self.assertFalse(any(isinstance(call, tuple) for call in purifier.calls))
+        subject.tick(65.0)
+        subject.tick(70.0)
+
+        self.assertEqual(subject.desired_level, 17)
+        self.assertEqual([call for call in purifier.calls if isinstance(call, tuple)],
+                         [("start", 3), ("level", 17)])
+        self.assertEqual(purifier.level, 17)
+
+    def test_delayed_readback_does_not_permanently_block_target(self):
+        sensor = FakeSensor([61.0] * 6)
+        device = FakeDevice()
+        purifier = MiioPurifier(device, expected_model="zhimi.airpurifier.v6")
+        subject = runner(sensor, purifier)
+        for now in (0.0, 5.0, 10.0):
+            subject.tick(now)
+        device.reported_level = 3
+        subject.tick(15.0)
+        device.reported_level = None
+        subject.tick(20.0)
+
+        self.assertEqual(device.favorite_level, 17)
+        self.assertEqual(device.calls.count("status"), 4)
+        self.assertEqual([call for call in device.calls if call == ("level", 17)],
+                         [("level", 17)])
 
     def test_many_network_failures_keep_retry_delay_finite(self):
         sensor = FakeSensor([57.0] * 1050)
@@ -221,6 +264,21 @@ class RunnerTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_run_constructs_adapter_without_initial_network_read(self):
+        sensor = FakeSensor([42.5])
+        purifier = FakePurifier()
+        with (patch("purifier_control.cli.load_config", return_value=CONFIG),
+              patch("purifier_control.cli.make_sensor", return_value=sensor),
+              patch("purifier_control.cli.MiioPurifier.from_host", return_value=purifier)
+              as factory,
+              patch("purifier_control.cli.Runner.run")):
+            code = main(["--config", "unused.toml", "run"])
+
+        self.assertEqual(code, 0)
+        factory.assert_called_once_with("192.0.2.10", "secret-token",
+                                        expected_model="zhimi.airpurifier.v6",
+                                        verify=False)
+
     def test_check_reads_only_and_never_prints_token(self):
         sensor = FakeSensor([42.5])
         purifier = FakePurifier()
@@ -253,7 +311,25 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(purifier.calls, ["info", "status"])
         self.assertIn("Connection: disconnected", output.getvalue())
+        self.assertEqual(output.getvalue().count("Internal model:"), 1)
         self.assertIn("42.5", output.getvalue())
+        self.assertNotIn("secret-token", output.getvalue())
+
+    def test_check_keeps_local_fields_when_device_info_is_unavailable(self):
+        sensor = FakeSensor([42.5])
+        output = io.StringIO()
+        with (patch("purifier_control.cli.load_config", return_value=CONFIG),
+              patch("purifier_control.cli.make_sensor", return_value=sensor),
+              patch("purifier_control.cli.make_purifier",
+                    side_effect=PurifierError("secret-token")),
+              patch("sys.stdout", output)):
+            code = main(["--config", "unused.toml", "check"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("Platform: macos", output.getvalue())
+        self.assertIn("42.5", output.getvalue())
+        self.assertIn("192.0.2.10", output.getvalue())
+        self.assertIn("Connection: disconnected", output.getvalue())
         self.assertNotIn("secret-token", output.getvalue())
 
 
