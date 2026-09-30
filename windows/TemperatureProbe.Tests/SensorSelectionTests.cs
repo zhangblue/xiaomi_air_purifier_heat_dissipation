@@ -72,6 +72,18 @@ public class SensorSelectionTests
     }
 
     [Fact]
+    public void RejectsZeroDegreeSensorAndUsesAnotherValidReading()
+    {
+        SensorReading[] readings =
+        [
+            new("CPU Package", 0),
+            new("Core (Tctl/Tdie)", 67),
+        ];
+
+        Assert.Equal(67f, SensorSelector.SelectCpuTemperature(readings));
+    }
+
+    [Fact]
     public void ThrowsWhenNoUsableCpuTemperatureExists()
     {
         InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
