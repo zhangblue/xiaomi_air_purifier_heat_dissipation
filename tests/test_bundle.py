@@ -88,6 +88,14 @@ class BundleTests(unittest.TestCase):
 
     def fake_run(self, args):
         self.calls.append(args)
+        if args[:2] == ["dotnet", "publish"]:
+            published = Path(args[args.index("-o") + 1])
+            published.mkdir(parents=True)
+            (published / "TemperatureProbe.exe").write_bytes(b"probe executable")
+            (published / "TemperatureProbe.runtimeconfig.json").write_text(
+                '{"runtimeOptions": {}}', encoding="utf-8"
+            )
+            return None
         if args[0] == "otool":
             return (f"{self.smctemp}:\n"
                     "\t/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit "
@@ -215,6 +223,55 @@ class BundleTests(unittest.TestCase):
                                   run_command=self.fake_run)
         self.assertIn('platform = "windows"',
                       (result / "config.example.toml").read_text(encoding="utf-8"))
+
+    def test_windows_bundle_publishes_self_contained_probe_and_launchers(self):
+        with patch("tools.build_bundle.sys.platform", "win32"), patch(
+            "tools.build_bundle.platform_module.machine", return_value="AMD64"
+        ):
+            result = build_bundle(self.source, self.output, "windows", "x64",
+                                  run_command=self.fake_run)
+
+        publish = next(args for args in self.calls if args[:2] == ["dotnet", "publish"])
+        self.assertEqual(publish[2], str(self.source / "windows" / "TemperatureProbe" /
+                                          "TemperatureProbe.csproj"))
+        self.assertEqual(publish[publish.index("-c") + 1], "Release")
+        self.assertEqual(publish[publish.index("-r") + 1], "win-x64")
+        self.assertEqual(publish[publish.index("--self-contained") + 1], "true")
+        self.assertEqual((result / "bin" / "TemperatureProbe.exe").read_bytes(),
+                         b"probe executable")
+        self.assertEqual((result / "bin" / "TemperatureProbe.runtimeconfig.json").read_text(
+            encoding="utf-8"), '{"runtimeOptions": {}}')
+        for command in ("check", "run"):
+            script = (result / f"{command}.cmd").read_text(encoding="utf-8")
+            self.assertIn("setlocal", script)
+            self.assertIn('set "PATH=%~dp0bin;%PATH%"', script)
+            self.assertIn('"%~dp0app\\purifier-control.exe"', script)
+            self.assertIn(f'--config "%~dp0config.toml" {command}', script)
+
+    def test_windows_build_requires_dotnet_sdk(self):
+        with patch("tools.build_bundle.sys.platform", "win32"), patch(
+            "tools.build_bundle.platform_module.machine", return_value="AMD64"
+        ), patch("tools.build_bundle.shutil.which", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "dotnet"):
+                build_bundle(self.source, self.output, "windows", "x64",
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+        self.assertEqual(self.calls, [])
+
+    def test_windows_missing_published_probe_does_not_publish_bundle(self):
+        def missing_probe(args):
+            if args[:2] == ["dotnet", "publish"]:
+                Path(args[args.index("-o") + 1]).mkdir(parents=True)
+                return None
+            return self.fake_run(args)
+
+        with patch("tools.build_bundle.sys.platform", "win32"), patch(
+            "tools.build_bundle.platform_module.machine", return_value="AMD64"
+        ):
+            with self.assertRaisesRegex(RuntimeError, "TemperatureProbe.exe"):
+                build_bundle(self.source, self.output, "windows", "x64",
+                             run_command=missing_probe)
+        self.assertFalse(self.output.exists())
 
     def test_existing_output_is_not_changed(self):
         self.output.mkdir()

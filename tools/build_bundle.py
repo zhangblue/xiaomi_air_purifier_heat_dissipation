@@ -73,10 +73,10 @@ def _validate_target(target_platform: str, arch: str) -> None:
 
 def _launcher(target_platform: str, command: str) -> str:
     if target_platform == "windows":
-        return ("@echo off\nsetlocal\nset \"BUNDLE_DIR=%~dp0\"\n"
-                "set \"PATH=%BUNDLE_DIR%bin;%PATH%\"\n"
-                f'"%BUNDLE_DIR%app\\purifier-control.exe" --config '
-                f'"%BUNDLE_DIR%config.toml" {command}\n')
+        return ("@echo off\nsetlocal\n"
+                "set \"PATH=%~dp0bin;%PATH%\"\n"
+                f'"%~dp0app\\purifier-control.exe" --config '
+                f'"%~dp0config.toml" {command}\n')
     return ('#!/bin/sh\nBUNDLE_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"\n'
             'PATH="$BUNDLE_DIR/bin:$PATH" '
             f'"$BUNDLE_DIR/app/purifier-control" --config '
@@ -196,9 +196,21 @@ def build_bundle(
             _collect_macos_probe(staging / "bin", run_command)
             executable = staging / "app" / "purifier-control"
         else:
+            if shutil.which("dotnet") is None:
+                raise RuntimeError("dotnet SDK is required to build a Windows bundle")
             (staging / "app").mkdir()
             executable = staging / "app" / "purifier-control.exe"
             run_command(["build-app", str(executable)])
+            probe_output = Path(temporary) / "temperature-probe-publish"
+            run_command([
+                "dotnet", "publish",
+                str(source / "windows" / "TemperatureProbe" / "TemperatureProbe.csproj"),
+                "-c", "Release", "-r", "win-x64", "--self-contained", "true",
+                "-o", str(probe_output),
+            ])
+            if not (probe_output / "TemperatureProbe.exe").is_file():
+                raise RuntimeError("TemperatureProbe.exe is missing from published output")
+            shutil.copytree(probe_output, staging / "bin", dirs_exist_ok=True)
         if not executable.is_file():
             raise RuntimeError("bundle app executable was not produced")
 
