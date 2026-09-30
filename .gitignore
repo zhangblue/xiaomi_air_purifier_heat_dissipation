@@ -3,4 +3,5 @@
 /windows/publish/
 /dist/
 /build/
+/.superpowers/sdd/
 __pycache__/
