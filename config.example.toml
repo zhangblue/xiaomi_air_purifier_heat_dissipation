@@ -9,9 +9,9 @@ temperature_sensor = "cpu"
 sample_interval_seconds = 5
 
 [control]
-high_temperature_c = 70
-high_duration_seconds = 60
-recover_temperature_c = 60
+high_temperature_c = 60
+high_duration_seconds = 15
+recover_temperature_c = 55
 recover_duration_seconds = 120
 high_favorite_level = 17
 low_favorite_level = 3

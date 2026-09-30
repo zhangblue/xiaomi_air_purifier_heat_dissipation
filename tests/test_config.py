@@ -1,3 +1,4 @@
+import shutil
 import sys
 import tempfile
 import unittest
@@ -59,6 +60,16 @@ class ConfigTests(unittest.TestCase):
     def test_windows_config_is_accepted_on_windows(self):
         config = load_config(self.config_path(platform="windows"), running_platform="win32")
         self.assertEqual(config.platform, "windows")
+
+    def test_example_config_uses_confirmed_control_defaults(self):
+        example_path = Path(__file__).resolve().parents[1] / "config.example.toml"
+        config_path = self.directory / "config.toml"
+        shutil.copyfile(example_path, config_path)
+        config = load_config(config_path, running_platform="darwin")
+        self.assertEqual(config.control.high_temperature_c, 60)
+        self.assertEqual(config.control.high_duration_seconds, 15)
+        self.assertEqual(config.control.recover_temperature_c, 55)
+        self.assertEqual(config.control.recover_duration_seconds, 120)
 
     def test_config_is_immutable_and_repr_does_not_disclose_token(self):
         config = load_config(self.config_path(), running_platform="darwin")
