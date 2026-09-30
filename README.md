@@ -4,6 +4,7 @@
 
 净化器增加周围空气流动，**不能代替电脑自身散热或过热保护**。本程序不会控制电脑风扇。第一版只支持手动启动，不安装开机自启服务；`run` 是无需交互的入口，留待以后接入 macOS LaunchAgent 或 Windows 任务计划程序。
 
+
 ## macOS 安装与运行
 
 需要 Python 3.11、Homebrew 和同一局域网中的净化器。在仓库目录打开终端：
@@ -67,3 +68,7 @@ purifier-control --config .\config.toml run
 净化器 IP 默认 `192.168.250.118`。如果路由器重新分配地址，请更新 `[purifier].host`。局域网或温度探针暂时不可用时，程序会报告故障并重试；遇到设备拒绝级别时应停止运行并核对可用档位。`check` 报型号不符时请勿运行控制程序。
 
 macOS 的 `check` 已只读实测。2026-09-30 在用户在场时，已对这台净化器短时写入并读回确认最爱档级别 3 和 17；还使用临时配置将高温阈值调至低于当时约 40°C 的 CPU 温度，验证程序从级别 3 自动升至 17。测试结束后，设备读回为原来的开机、Auto 模式、最爱档记录值 0。默认 60°C 阈值尚未通过实际升温触发，长时间运行与睡眠恢复仍需继续观察。Windows 真机传感器与净化器联动也尚需在 Windows 电脑上验收。
+
+### 如何获取 token
+
+可使用 [Xiaomi Cloud Tokens Extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor) 获取局域网 token。按该项目的说明运行工具，通过米家账号或扫码登录，选择设备所在的服务器区域（不确定时可留空检查所有区域），再按净化器的名称或 IP 地址找到对应设备并复制 token。此工具可能列出账号下其他设备的 token，请勿分享完整输出；将这台净化器的 token 按下文保存到 `.secrets/purifier-token`，不要提交到 Git。
