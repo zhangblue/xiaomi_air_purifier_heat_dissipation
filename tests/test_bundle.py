@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform as platform_module
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,8 +47,30 @@ class BundleTests(unittest.TestCase):
         (secrets / "purifier-token").write_text(FAKE_TOKEN, encoding="ascii")
         self.output = self.root / "dist" / "bundle"
         self.output.parent.mkdir()
+        keg = self.root / "smctemp-keg"
+        (keg / "bin").mkdir(parents=True)
+        self.smctemp = keg / "bin" / "smctemp"
+        self.smctemp.write_text("fake smctemp", encoding="utf-8")
+        (keg / "LICENSE").write_text("redistribution allowed", encoding="utf-8")
+        which_patch = patch("shutil.which", return_value=str(self.smctemp))
+        which_patch.start()
+        self.addCleanup(which_patch.stop)
+        self.calls = []
 
     def fake_run(self, args):
+        self.calls.append(args)
+        if args[0] == "otool":
+            return (f"{self.smctemp}:\n"
+                    "\t/System/Library/Frameworks/IOKit.framework/Versions/A/IOKit "
+                    "(compatibility version 1.0.0, current version 1.0.0)\n"
+                    "\t/usr/lib/libSystem.B.dylib "
+                    "(compatibility version 1.0.0, current version 1.0.0)\n")
+        if args[:3] == [sys.executable, "-m", "PyInstaller"]:
+            dist = Path(args[args.index("--distpath") + 1])
+            app = dist / "purifier-control" / "purifier-control"
+            app.parent.mkdir(parents=True)
+            app.write_text("fake executable", encoding="utf-8")
+            return None
         app = Path(args[-1])
         app.parent.mkdir(parents=True, exist_ok=True)
         app.write_text("fake executable", encoding="utf-8")
@@ -61,7 +84,8 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(result, self.output)
         self.assertEqual(
             {str(path.relative_to(result)) for path in result.rglob("*")},
-            {"app", "app/purifier-control", "bin", "config.example.toml",
+            {"app", "app/purifier-control", "bin", "bin/smctemp", "bin/LICENSE.smctemp",
+             "config.example.toml",
              "check.command", "run.command", "README.txt"},
         )
         self.assertFalse((result / "config.toml").exists())
@@ -71,6 +95,48 @@ class BundleTests(unittest.TestCase):
             "".join(path.read_text(encoding="utf-8") for path in result.rglob("*")
                     if path.is_file()),
         )
+
+    def test_macos_build_uses_current_python_and_collects_temperature_probe(self):
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            result = build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                                  run_command=self.fake_run)
+        pyinstaller_calls = [args for args in self.calls
+                             if args[:3] == [sys.executable, "-m", "PyInstaller"]]
+        self.assertEqual(len(pyinstaller_calls), 1)
+        args = pyinstaller_calls[0]
+        self.assertIn("--onedir", args)
+        self.assertIn("--console", args)
+        self.assertEqual(args[args.index("--name") + 1], "purifier-control")
+        self.assertEqual(args[-1], str(self.source / "tools" / "packaged_entry.py"))
+        for option in ("--distpath", "--workpath", "--specpath"):
+            self.assertIn(option, args)
+        self.assertEqual((result / "bin" / "smctemp").read_text(encoding="utf-8"),
+                         "fake smctemp")
+        self.assertEqual((result / "bin" / "LICENSE.smctemp").read_text(encoding="utf-8"),
+                         "redistribution allowed")
+        launcher = (result / "check.command").read_text(encoding="utf-8")
+        self.assertIn('PATH="$BUNDLE_DIR/bin:$PATH" "$BUNDLE_DIR/app/purifier-control"', launcher)
+        self.assertNotIn("export PATH", launcher)
+
+    def test_macos_rejects_non_system_smctemp_dependency(self):
+        def run(args):
+            if args[0] == "otool":
+                return (f"{self.smctemp}:\n\t/opt/homebrew/lib/libexample.dylib "
+                        "(compatibility version 1.0.0, current version 1.0.0)\n")
+            return self.fake_run(args)
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaisesRegex(RuntimeError, "non-system dependency"):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=run)
+        self.assertFalse(self.output.exists())
+
+    def test_macos_rejects_missing_smctemp_license(self):
+        (self.smctemp.parent.parent / "LICENSE").unlink()
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaisesRegex(RuntimeError, "license"):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
 
     def test_windows_template_targets_windows(self):
         with patch("tools.build_bundle.sys.platform", "win32"), patch(

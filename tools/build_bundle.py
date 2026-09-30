@@ -1,13 +1,10 @@
-"""Build a private-data-free portable directory skeleton.
-
-Runtime collection is added in later implementation steps.  This module owns
-the public manifest and publishes it only after the injected build succeeds.
-"""
+"""Build a private-data-free portable directory bundle."""
 
 from __future__ import annotations
 
 import platform as platform_module
 import re
+import shutil
 import sys
 import tempfile
 import tomllib
@@ -75,13 +72,39 @@ def _launcher(target_platform: str, command: str) -> str:
             f'"$BUNDLE_DIR/config.toml" {command}\n')
 
 
+def _collect_macos_probe(bin_dir: Path, run_command: Callable[[list[str]], str | None]) -> None:
+    located = shutil.which("smctemp")
+    if located is None:
+        raise RuntimeError("smctemp is required to build a macOS bundle")
+    executable = Path(located).resolve()
+    if not executable.is_file():
+        raise RuntimeError("smctemp executable is missing")
+    license_file = executable.parent.parent / "LICENSE"
+    if not license_file.is_file() or not license_file.read_bytes().strip():
+        raise RuntimeError("smctemp license material is missing")
+
+    linkage = run_command(["otool", "-L", str(executable)])
+    if not isinstance(linkage, str):
+        raise RuntimeError("could not inspect smctemp dependencies with otool")
+    dependencies = [line.strip().split(" (", 1)[0] for line in linkage.splitlines()[1:]
+                    if line.strip()]
+    if not dependencies:
+        raise RuntimeError("could not inspect smctemp dependencies with otool")
+    for dependency in dependencies:
+        if not dependency.startswith(("/System/Library/", "/usr/lib/")):
+            raise RuntimeError(f"smctemp has non-system dependency: {dependency}")
+
+    shutil.copy2(executable, bin_dir / "smctemp")
+    shutil.copy2(license_file, bin_dir / "LICENSE.smctemp")
+
+
 def build_bundle(
     source: Path,
     output: Path,
     platform: str,
     arch: str,
     *,
-    run_command: Callable[[list[str]], None],
+    run_command: Callable[[list[str]], str | None],
 ) -> Path:
     """Stage a public-only bundle and publish it after every step succeeds."""
     _validate_target(platform, arch)
@@ -92,12 +115,27 @@ def build_bundle(
     with tempfile.TemporaryDirectory(prefix=".bundle-", dir=output.parent) as temporary:
         staging = Path(temporary) / "bundle"
         staging.mkdir()
-        (staging / "app").mkdir()
         (staging / "bin").mkdir()
-        executable = staging / "app" / (
-            "purifier-control.exe" if platform == "windows" else "purifier-control"
-        )
-        run_command(["build-app", str(executable)])
+        if platform == "macos":
+            root = Path(temporary)
+            dist_path = root / "pyinstaller-dist"
+            run_command([
+                sys.executable, "-m", "PyInstaller", "--onedir", "--console",
+                "--name", "purifier-control", "--distpath", str(dist_path),
+                "--workpath", str(root / "pyinstaller-work"),
+                "--specpath", str(root / "pyinstaller-spec"),
+                str(source / "tools" / "packaged_entry.py"),
+            ])
+            built_app = dist_path / "purifier-control"
+            if not (built_app / "purifier-control").is_file():
+                raise RuntimeError("bundle app executable was not produced")
+            shutil.move(str(built_app), str(staging / "app"))
+            _collect_macos_probe(staging / "bin", run_command)
+            executable = staging / "app" / "purifier-control"
+        else:
+            (staging / "app").mkdir()
+            executable = staging / "app" / "purifier-control.exe"
+            run_command(["build-app", str(executable)])
         if not executable.is_file():
             raise RuntimeError("bundle app executable was not produced")
 
