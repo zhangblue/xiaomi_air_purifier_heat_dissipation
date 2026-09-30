@@ -59,7 +59,7 @@ purifier-control --config .\config.toml check
 purifier-control --config .\config.toml run
 ```
 
-探针应输出含 `temperature_c` 的 JSON。如果探针无法读取 CPU 温度，先检查 Windows 传感器可用性和权限。`check` 成功后再运行 `run`；按 `Ctrl+C` 停止。停止后净化器保持当时的电源和档位状态。
+探针应输出含 `temperature_c` 的 JSON。`0°C` 不是有效的 CPU 读数，探针会报错并列出发现的温度传感器。若在 Ryzen 电脑上看到 `Core (Tctl/Tdie)=0`，先确认使用管理员权限；LibreHardwareMonitor 的底层读取还可能需要安装 [PawnIO 官方签名驱动](https://github.com/namazso/PawnIO.Setup/releases)。驱动会取得硬件访问权限，应由电脑所有者决定是否安装；不要为此关闭 Windows 内存完整性等安全保护。安装后重新运行探针，只有读到可信的非零温度且 `check` 成功，再运行 `run`；按 `Ctrl+C` 停止。停止后净化器保持当时的电源和档位状态。
 
 ## 配置与注意事项
 

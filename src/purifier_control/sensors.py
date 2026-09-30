@@ -19,7 +19,7 @@ class TemperatureSource(Protocol):
 
 def _valid_temperature(value: object) -> float:
     if (isinstance(value, bool) or not isinstance(value, (float, int))
-            or not math.isfinite(value) or not 0 <= value <= 125):
+            or not math.isfinite(value) or not 0 < value <= 125):
         raise SensorError("CPU temperature is invalid")
     return float(value)
 

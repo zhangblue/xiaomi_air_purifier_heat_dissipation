@@ -61,7 +61,8 @@ class WindowsTemperatureSourceTests(unittest.TestCase):
     def test_rejects_missing_or_invalid_json_temperature(self):
         for output in ('{}', 'not json', '{"temperature_c":"64.2"}',
                        '{"temperature_c":null}', '{"temperature_c":126}',
-                       '{"temperature_c":-1}', '{"temperature_c":NaN}'):
+                       '{"temperature_c":-1}', '{"temperature_c":0}',
+                       '{"temperature_c":NaN}'):
             with self.subTest(output=output):
                 with patch("purifier_control.sensors.subprocess.run",
                            return_value=subprocess.CompletedProcess([], 0, output, "")):
