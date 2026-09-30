@@ -22,7 +22,20 @@ class BundleTests(unittest.TestCase):
         self.source = self.root / "source"
         self.source.mkdir()
         (self.source / "config.example.toml").write_text(
-            'platform = "macos"\n[purifier]\ntoken_file = ".secrets/purifier-token"\n',
+            'platform = "macos"\n'
+            '[purifier]\n'
+            'host = "192.168.250.118"\n'
+            'token_file = ".secrets/purifier-token"\n'
+            '[system]\n'
+            'temperature_sensor = "cpu"\n'
+            'sample_interval_seconds = 5\n'
+            '[control]\n'
+            'high_temperature_c = 60\n'
+            'high_duration_seconds = 15\n'
+            'recover_temperature_c = 55\n'
+            'recover_duration_seconds = 120\n'
+            'high_favorite_level = 17\n'
+            'low_favorite_level = 3\n',
             encoding="utf-8",
         )
         (self.source / "config.toml").write_text(
@@ -110,6 +123,36 @@ class BundleTests(unittest.TestCase):
             result = build_bundle(self.source, output, "macos", platform_module.machine(),
                                   run_command=self.fake_run)
         self.assertTrue((result / "app" / "purifier-control").is_file())
+
+    def test_template_symlink_to_private_config_is_rejected(self):
+        template = self.source / "config.example.toml"
+        template.unlink()
+        template.symlink_to(self.source / "config.toml")
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaises(ValueError):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+
+    def test_token_in_public_template_comment_is_rejected(self):
+        template = self.source / "config.example.toml"
+        template.write_text(template.read_text(encoding="utf-8") +
+                            f"# {FAKE_TOKEN}\n", encoding="utf-8")
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaises(ValueError):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
+
+    def test_unlisted_template_field_is_rejected(self):
+        template = self.source / "config.example.toml"
+        template.write_text(template.read_text(encoding="utf-8") +
+                            'private_note = "do not publish"\n', encoding="utf-8")
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            with self.assertRaises(ValueError):
+                build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                             run_command=self.fake_run)
+        self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

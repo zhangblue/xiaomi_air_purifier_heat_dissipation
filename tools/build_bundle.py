@@ -7,10 +7,47 @@ the public manifest and publishes it only after the injected build succeeds.
 from __future__ import annotations
 
 import platform as platform_module
+import re
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Callable
+
+
+PUBLIC_TEMPLATE = (
+    'platform = "macos"\n\n'
+    '[purifier]\n'
+    'host = "192.168.250.118"\n'
+    'token_file = ".secrets/purifier-token"\n\n'
+    '[system]\n'
+    'temperature_sensor = "cpu"\n'
+    'sample_interval_seconds = 5\n\n'
+    '[control]\n'
+    'high_temperature_c = 60\n'
+    'high_duration_seconds = 15\n'
+    'recover_temperature_c = 55\n'
+    'recover_duration_seconds = 120\n'
+    'high_favorite_level = 17\n'
+    'low_favorite_level = 3\n'
+)
+PUBLIC_DEFAULTS = tomllib.loads(PUBLIC_TEMPLATE)
+
+
+def _validated_template(source: Path, target_platform: str) -> str:
+    path = source / "config.example.toml"
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("config.example.toml must be a regular public file")
+    text = path.read_text(encoding="utf-8")
+    if re.search(r"[0-9a-fA-F]{32}", text):
+        raise ValueError("config.example.toml contains a token-like value")
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        raise ValueError("config.example.toml must be valid public TOML") from None
+    if data != PUBLIC_DEFAULTS:
+        raise ValueError("config.example.toml contains fields or values outside public defaults")
+    return PUBLIC_TEMPLATE.replace('platform = "macos"', f'platform = "{target_platform}"', 1)
 
 
 def _validate_target(target_platform: str, arch: str) -> None:
@@ -50,6 +87,7 @@ def build_bundle(
     _validate_target(platform, arch)
     if output.exists() or output.is_symlink():
         raise FileExistsError(f"bundle output already exists: {output}")
+    template = _validated_template(source, platform)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".bundle-", dir=output.parent) as temporary:
         staging = Path(temporary) / "bundle"
@@ -63,10 +101,6 @@ def build_bundle(
         if not executable.is_file():
             raise RuntimeError("bundle app executable was not produced")
 
-        template = (source / "config.example.toml").read_text(encoding="utf-8")
-        if 'platform = "macos"' not in template:
-            raise ValueError("config.example.toml must contain the public macOS platform default")
-        template = template.replace('platform = "macos"', f'platform = "{platform}"', 1)
         (staging / "config.example.toml").write_text(template, encoding="utf-8")
 
         suffix = ".cmd" if platform == "windows" else ".command"
