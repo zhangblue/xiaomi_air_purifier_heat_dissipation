@@ -1,4 +1,6 @@
 /.secrets/
 /.venv/
 /windows/publish/
+/dist/
+/build/
 __pycache__/
