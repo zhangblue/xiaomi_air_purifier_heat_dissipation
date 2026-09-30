@@ -27,7 +27,7 @@ public static class SensorSelector
         SensorReading[] available = readings.ToArray();
         SensorReading[] valid = available
             .Where(reading => reading.Value is float value &&
-                              float.IsFinite(value) && value >= 0 && value <= 125)
+                              float.IsFinite(value) && value > 0 && value <= 125)
             .ToArray();
 
         SensorReading? package = valid.FirstOrDefault(reading =>
@@ -50,7 +50,8 @@ public static class SensorSelector
         if (cores.Length == 0)
             throw new InvalidOperationException(
                 "No valid CPU temperature sensor was found. Available CPU temperature sensors: " +
-                (available.Length == 0 ? "none" : string.Join(", ", available.Select(reading => reading.Name))));
+                (available.Length == 0 ? "none" : string.Join(", ", available.Select(reading =>
+                    $"{reading.Name}={reading.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"}"))));
 
         return (float)cores.Average(value => (double)value);
     }
