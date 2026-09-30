@@ -5,12 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import platform as platform_module
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+import tools.build_bundle as bundle_module
 from tools.build_bundle import build_bundle
 
 
@@ -137,6 +141,49 @@ class BundleTests(unittest.TestCase):
             "".join(path.read_text(encoding="utf-8") for path in result.rglob("*")
                     if path.is_file()),
         )
+
+    def test_generated_guide_covers_setup_and_platform_limits(self):
+        with patch("tools.build_bundle.sys.platform", "darwin"):
+            result = build_bundle(self.source, self.output, "macos", platform_module.machine(),
+                                  run_command=self.fake_run)
+        guide = (result / "README.txt").read_text(encoding="utf-8")
+        for required in (
+            "config.example.toml", "config.toml", ".secrets/purifier-token",
+            "check", "run", "PawnIO", "same operating system", "same CPU architecture",
+            "unsigned", "does not restore", "GPL-2.0-only",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, guide)
+
+    def test_cli_uses_default_output_and_reports_success_path(self):
+        output = StringIO()
+        with (patch("tools.build_bundle.sys.platform", "darwin"),
+              patch("tools.build_bundle.platform_module.machine", return_value="arm64"),
+              patch("tools.build_bundle.build_bundle",
+                    return_value=Path("dist/macos-arm64")) as build,
+              redirect_stdout(output)):
+            code = bundle_module.main([])
+        self.assertEqual(code, 0)
+        self.assertIn("dist/macos-arm64", output.getvalue())
+        self.assertEqual(build.call_args.args[1:4], (Path("dist/macos-arm64"), "macos", "arm64"))
+
+    def test_cli_accepts_custom_output_and_reports_failure_without_secret(self):
+        output = StringIO()
+        with patch("tools.build_bundle.build_bundle",
+                   side_effect=RuntimeError("build failed")) as build, redirect_stderr(output):
+            code = bundle_module.main(["--output", "private-bundle"])
+        self.assertNotEqual(code, 0)
+        self.assertEqual(build.call_args.args[1], Path("private-bundle"))
+        self.assertIn("build failed", output.getvalue())
+        self.assertNotIn(FAKE_TOKEN, output.getvalue())
+
+    def test_external_build_failure_names_tool_without_leaking_child_output(self):
+        args = [sys.executable, "-m", "PyInstaller", "--onedir"]
+        failure = subprocess.CalledProcessError(1, args, stderr=FAKE_TOKEN)
+        with patch("tools.build_bundle.subprocess.run", side_effect=failure):
+            with self.assertRaisesRegex(RuntimeError, "PyInstaller failed") as captured:
+                bundle_module._run_build_command(args)
+        self.assertNotIn(FAKE_TOKEN, str(captured.exception))
 
     def test_macos_build_uses_current_python_and_collects_temperature_probe(self):
         with patch("tools.build_bundle.sys.platform", "darwin"):

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import platform as platform_module
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import tomllib
@@ -225,14 +227,78 @@ def build_bundle(
 
         (staging / "README.txt").write_text(
             "Portable purifier-control bundle\n\n"
-            "Copy config.example.toml to config.toml and set the purifier IP.\n"
-            "Create .secrets/purifier-token with your own device token.\n"
-            "macOS: smctemp GPL-2.0-only license and version 0.7.0 source "
-            "archive are in bin/.\n"
-            "Run check first; it reads status without changing the device.\n"
-            "Run run only while present. Stop with Ctrl+C.\n"
-            "Stopping does not restore the purifier's previous state.\n",
+            "Move this entire folder to a compatible computer with the same operating system "
+            "and same CPU architecture. Older OS versions may not work.\n"
+            "Copy config.example.toml to config.toml in this folder and set the purifier IP.\n"
+            "Create .secrets/purifier-token in this folder with your own 32-digit hex device "
+            "token; the bundle does not include a token or private config.\n"
+            "Run check.command (macOS) or check.cmd (Windows) first. check reads CPU and device "
+            "status without changing the purifier.\n"
+            "When present and ready to control the device, run run.command (macOS) or "
+            "run.cmd (Windows). Stop with Ctrl+C. Stopping does not restore the purifier's "
+            "previous power, mode, or favorite level; restore them yourself if needed.\n"
+            "Windows: Some CPU sensors need a separately installed PawnIO driver. The bundle "
+            "cannot include or install it; only the computer owner should decide.\n"
+            "macOS: The operating system may require you to approve an unsigned app before "
+            "the first launch.\n"
+            "macOS: smctemp GPL-2.0-only license and version 0.7.0 source archive are in "
+            "bin/. Their inclusion does not constitute a legal redistribution review.\n",
             encoding="utf-8",
         )
         staging.rename(output)
     return output
+
+
+def _run_build_command(args: list[str]) -> str | None:
+    if args[0] == "build-app":
+        executable = Path(args[1])
+        with tempfile.TemporaryDirectory(prefix=".pyinstaller-") as temporary:
+            root = Path(temporary)
+            _run_build_command([
+                sys.executable, "-m", "PyInstaller", "--onedir", "--console",
+                "--name", "purifier-control", "--distpath", str(root / "dist"),
+                "--workpath", str(root / "work"), "--specpath", str(root / "spec"),
+                str(Path(__file__).resolve().parents[1] / "tools" / "packaged_entry.py"),
+            ])
+            built = root / "dist" / "purifier-control"
+            if not (built / executable.name).is_file():
+                raise RuntimeError("PyInstaller did not produce the app executable")
+            shutil.copytree(built, executable.parent, dirs_exist_ok=True)
+        return None
+    command_name = ("PyInstaller" if args[:3] == [sys.executable, "-m", "PyInstaller"]
+                    else Path(args[0]).name)
+    try:
+        result = subprocess.run(args, check=True, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise RuntimeError(f"required build command is missing: {command_name}") from None
+    except subprocess.CalledProcessError as error:
+        raise RuntimeError(f"{command_name} failed with exit code {error.returncode}") from None
+    return result.stdout
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="build_bundle")
+    parser.add_argument("--output", type=Path, help="new directory for the completed bundle")
+    args = parser.parse_args(argv)
+    if sys.platform == "darwin":
+        platform_name = "macos"
+        arch = platform_module.machine()
+    elif sys.platform == "win32":
+        platform_name = "windows"
+        arch = "x64"
+    else:
+        print("Build failed: only macOS and Windows are supported", file=sys.stderr)
+        return 1
+    output = args.output or Path("dist") / f"{platform_name}-{arch.lower()}"
+    try:
+        result = build_bundle(Path(__file__).resolve().parents[1], output, platform_name,
+                              arch, run_command=_run_build_command)
+    except (FileExistsError, OSError, RuntimeError, ValueError) as error:
+        print(f"Build failed: {error}", file=sys.stderr)
+        return 1
+    print(f"Bundle created: {result}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -4,6 +4,34 @@
 
 净化器增加周围空气流动，**不能代替电脑自身散热或过热保护**。本程序不会控制电脑风扇。第一版只支持手动启动，不安装开机自启服务；`run` 是无需交互的入口，留待以后接入 macOS LaunchAgent 或 Windows 任务计划程序。
 
+## 构建与迁移目录包
+
+目录包可复制到另一台**同操作系统、同 CPU 架构**的电脑，目标机无需另装 Python、Python 包、.NET Runtime 或 `smctemp`。macOS 与 Windows 要分别在对应系统上构建，不能跨系统或跨架构构建；较新系统构建的包也不保证兼容较旧系统。首版 Windows 构建目标为 x64，macOS 为构建机原生架构。目标机仍须能读取 CPU 温度，并能通过局域网访问净化器。目录包不提供自动启动。
+
+在项目根目录准备构建机。macOS 需 Python 3.11、Homebrew 安装的 `narugit/tap/smctemp`；构建器会核对其二进制、来源归档、许可证材料及系统依赖，核对失败就停止构建。Windows 需 Python 3.11 和 .NET 8 SDK。两边均须安装项目的打包依赖：
+
+```sh
+# macOS
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -e '.[bundle]'
+.venv/bin/python -m tools.build_bundle
+# 自选尚不存在的输出目录：.venv/bin/python -m tools.build_bundle --output dist/my-mac
+```
+
+```powershell
+# Windows PowerShell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e '.[bundle]'
+.\.venv\Scripts\python.exe -m tools.build_bundle
+# 自选尚不存在的输出目录：.\.venv\Scripts\python.exe -m tools.build_bundle --output dist\my-pc
+```
+
+默认输出分别为 `dist/macos-<架构>/`、`dist/windows-x64/`。成功时命令会打印包路径；现有输出目录不会被覆盖。将整个目录复制到目标机，在包内复制 `config.example.toml` 为 `config.toml`，修改 `[purifier].host`，并在包内创建 `.secrets/purifier-token`，只写入该设备的 32 位十六进制 token。**token 和私有配置不进入构建包**，也不要把 token 放入命令参数、截图或日志。macOS 可使用下文的无回显输入命令在包目录创建 token；Windows 可使用下文的 PowerShell 命令，并限制文件访问权限。
+
+在目标机先运行只读的 `check.command`（macOS）或 `check.cmd`（Windows），确认温度、型号和设备连接后，在场时手动运行 `run.command` 或 `run.cmd`。按 `Ctrl+C` 停止。程序停止后**不会恢复净化器原来的电源、模式或最爱档级别**，如有需要请自行恢复并确认。macOS 对未签名程序可能显示安全提示，需由电脑所有者在系统设置中批准运行。Windows 有些温度传感器仍需所有者单独安装 PawnIO 驱动；目录包不包含或安装该驱动，不应为此关闭系统安全保护。
+
+macOS 包内 `bin/` 随附 `smctemp` 的 GPL-2.0-only 许可证及固定版本源码归档，供再分发时查阅；随附材料**不等同于法律审核**。本仓库的 macOS Python 测试或离线构建结果也不代表 Windows 已完成打包或目标机验收；需要在相应系统上分别构建并验证。真实设备的 `run` 验收应在用户在场时先记录状态，短时测试、停止、恢复原状态并读回确认。
+
 
 ## macOS 安装与运行
 
