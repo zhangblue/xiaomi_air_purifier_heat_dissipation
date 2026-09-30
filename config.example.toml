@@ -1,7 +1,9 @@
+# Set to "windows" when running on Windows; it must match this computer.
 platform = "macos"
 
 [purifier]
 host = "192.168.250.118"
+# Relative to this configuration file. Keep the token out of this file.
 token_file = ".secrets/purifier-token"
 
 [system]
@@ -13,5 +15,6 @@ high_temperature_c = 60
 high_duration_seconds = 15
 recover_temperature_c = 55
 recover_duration_seconds = 120
+# Confirm that this specific purifier accepts both levels before unattended use.
 high_favorite_level = 17
 low_favorite_level = 3

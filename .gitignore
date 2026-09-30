@@ -1,2 +1,4 @@
 /.secrets/
+/.venv/
+/windows/publish/
 __pycache__/
