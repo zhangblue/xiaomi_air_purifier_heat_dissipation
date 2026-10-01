@@ -3,5 +3,6 @@
 /windows/publish/
 /dist/
 /build/
+*.egg-info/
 /.superpowers/sdd/
 __pycache__/
