@@ -18,6 +18,8 @@ python3.11 -m venv .venv
 # 自选尚不存在的输出目录：.venv/bin/python -m tools.build_bundle --output dist/my-mac
 ```
 
+如果现有 `.venv` 已失效，或出现 `Build failed: PyInstaller failed with exit code 1`，请参阅 [macOS 打包环境与故障排查](docs/macos-bundle-build.md)。
+
 ```powershell
 # Windows PowerShell
 py -3.11 -m venv .venv
