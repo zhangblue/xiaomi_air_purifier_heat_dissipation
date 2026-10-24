@@ -120,6 +120,28 @@ def runner(sensor, purifier, clock=None):
 
 
 class RunnerTests(unittest.TestCase):
+    def test_initial_sensor_error_waits_for_valid_temperature_before_start(self):
+        purifier = FakePurifier()
+        subject = runner(FakeSensor([SensorError("probe failed"), 57.0, 57.0]),
+                         purifier)
+
+        subject.tick(0.0)
+        self.assertEqual(purifier.calls, [])
+        subject.tick(5.0)
+        subject.tick(10.0)
+
+        self.assertEqual([call for call in purifier.calls if isinstance(call, tuple)],
+                         [("start", 3)])
+        self.assertEqual(purifier.level, 3)
+
+    def test_repeated_initial_sensor_errors_never_access_device(self):
+        purifier = FakePurifier()
+        subject = runner(FakeSensor([SensorError("probe failed")] * 4), purifier)
+
+        for now in (0.0, 5.0, 10.0, 15.0):
+            subject.tick(now)
+            self.assertEqual(purifier.calls, [])
+
     def test_sleep_gap_restarts_high_temperature_duration(self):
         sensor = FakeSensor([61.0] * 6)
         purifier = FakePurifier()

@@ -59,6 +59,8 @@ class Runner:
             self._sensor_failed = False
 
         new_level = self.policy.observe(temperature, now)
+        if temperature is None and not self._started:
+            return
         if new_level is not None:
             self.desired_level = new_level
             if self._started and self.desired_level != self._blocked_level:
