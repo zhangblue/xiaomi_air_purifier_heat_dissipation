@@ -22,6 +22,76 @@ FAKE_TOKEN = "0123456789abcdef0123456789abcdef"
 
 
 class BundleTests(unittest.TestCase):
+    def test_linux_bundle_is_public_native_onedir_with_executable_launchers(self):
+        with (patch("tools.build_bundle.sys.platform", "linux"),
+              patch("tools.build_bundle.platform_module.machine", return_value="x86_64"),
+              patch("tools.build_bundle._collect_macos_probe") as collect):
+            result = build_bundle(self.source, self.output, "linux", "x86_64",
+                                  run_command=self.fake_run)
+        collect.assert_not_called()
+        self.assertEqual({str(p.relative_to(result)) for p in result.rglob("*")},
+                         {"app", "app/purifier-control", "bin", "config.example.toml",
+                          "check.sh", "run.sh", "README.txt"})
+        self.assertIn('platform = "linux"', (result / "config.example.toml").read_text())
+        self.assertNotIn(FAKE_TOKEN, "".join(p.read_text() for p in result.rglob("*")
+                                           if p.is_file()))
+        for command in ("check", "run"):
+            script = result / f"{command}.sh"
+            self.assertTrue(script.stat().st_mode & 0o111)
+            self.assertIn('$(dirname -- "$0")', script.read_text())
+            self.assertIn(f'--config "$BUNDLE_DIR/config.toml" {command}', script.read_text())
+        args, = self.calls
+        self.assertEqual(args[:3], [sys.executable, "-m", "PyInstaller"])
+        self.assertIn("--onedir", args)
+        guide = (result / "README.txt").read_text()
+        for required in ("check.sh", "run.sh", "coretemp", "Package", "no Python required",
+                         "does not restore", "without changing the purifier"):
+            self.assertIn(required, guide)
+
+    def test_linux_cli_default_output(self):
+        with (patch("tools.build_bundle.sys.platform", "linux"),
+              patch("tools.build_bundle.platform_module.machine", return_value="x86_64"),
+              patch("tools.build_bundle.build_bundle", return_value=Path("dist/linux-x86_64")) as build,
+              redirect_stdout(StringIO())):
+            self.assertEqual(bundle_module.main([]), 0)
+        self.assertEqual(build.call_args.args[1:4], (Path("dist/linux-x86_64"), "linux", "x86_64"))
+
+    def test_linux_rejects_cross_platform_or_architecture_before_build(self):
+        for host, machine, arch in (("darwin", "x86_64", "x86_64"),
+                                    ("linux", "aarch64", "x86_64"),
+                                    ("linux", "x86_64", "arm64")):
+            with self.subTest(host=host, machine=machine, arch=arch):
+                with (patch("tools.build_bundle.sys.platform", host),
+                      patch("tools.build_bundle.platform_module.machine", return_value=machine)):
+                    with self.assertRaises(ValueError):
+                        build_bundle(self.source, self.output, "linux", arch,
+                                     run_command=self.fake_run)
+                self.assertFalse(self.output.exists())
+                self.assertEqual(self.calls, [])
+
+    def test_linux_existing_output_is_preserved(self):
+        self.output.mkdir()
+        marker = self.output / "keep.txt"
+        marker.write_text("keep")
+        with (patch("tools.build_bundle.sys.platform", "linux"),
+              patch("tools.build_bundle.platform_module.machine", return_value="x86_64")):
+            with self.assertRaises(FileExistsError):
+                build_bundle(self.source, self.output, "linux", "x86_64", run_command=self.fake_run)
+        self.assertEqual(marker.read_text(), "keep")
+        self.assertEqual(self.calls, [])
+
+    def test_linux_build_failure_or_missing_app_does_not_publish(self):
+        def fail(args):
+            raise RuntimeError("PyInstaller failed")
+        for run in (fail, lambda args: None):
+            with self.subTest(run=run):
+                with (patch("tools.build_bundle.sys.platform", "linux"),
+                      patch("tools.build_bundle.platform_module.machine", return_value="x86_64")):
+                    with self.assertRaises(RuntimeError):
+                        build_bundle(self.source, self.output, "linux", "x86_64", run_command=run)
+                self.assertFalse(self.output.exists())
+                self.assertEqual(list(self.output.parent.iterdir()), [])
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

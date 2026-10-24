@@ -69,6 +69,9 @@ def _validate_target(target_platform: str, arch: str) -> None:
             "amd64", "x86_64"
         }:
             raise ValueError("Windows bundles require a Windows x64 build machine")
+    elif target_platform == "linux":
+        if sys.platform != "linux" or arch != "x86_64" or platform_module.machine() != "x86_64":
+            raise ValueError("Linux bundles require a native Linux x86_64 build machine")
     else:
         raise ValueError(f"unsupported bundle platform: {target_platform}")
 
@@ -181,7 +184,7 @@ def build_bundle(
         staging = Path(temporary) / "bundle"
         staging.mkdir()
         (staging / "bin").mkdir()
-        if platform == "macos":
+        if platform in ("macos", "linux"):
             root = Path(temporary)
             dist_path = root / "pyinstaller-dist"
             run_command([
@@ -195,7 +198,8 @@ def build_bundle(
             if not (built_app / "purifier-control").is_file():
                 raise RuntimeError("bundle app executable was not produced")
             shutil.move(str(built_app), str(staging / "app"))
-            _collect_macos_probe(staging / "bin", run_command)
+            if platform == "macos":
+                _collect_macos_probe(staging / "bin", run_command)
             executable = staging / "app" / "purifier-control"
         else:
             if shutil.which("dotnet") is None:
@@ -218,11 +222,11 @@ def build_bundle(
 
         (staging / "config.example.toml").write_text(template, encoding="utf-8")
 
-        suffix = ".cmd" if platform == "windows" else ".command"
+        suffix = {"windows": ".cmd", "macos": ".command", "linux": ".sh"}[platform]
         for command in ("check", "run"):
             script = staging / f"{command}{suffix}"
             script.write_text(_launcher(platform, command), encoding="utf-8")
-            if platform == "macos":
+            if platform in ("macos", "linux"):
                 script.chmod(0o755)
 
         (staging / "README.txt").write_text(
@@ -247,13 +251,24 @@ def build_bundle(
             "-Encoding ascii .\\.secrets\\purifier-token\n"
             "Set-Clipboard -Value ''\n"
             "On Windows, confirm the token file is readable only by your account.\n"
-            "Run check.command (macOS) or check.cmd (Windows) first. check reads CPU and device "
+            "Linux Terminal (Bash): copy config.example.toml to config.toml, then use a "
+            "hidden input prompt; do not put the token in command arguments:\n"
+            "mkdir -p .secrets && chmod 700 .secrets\n"
+            "(umask 077; read -r -s -p 'Token: ' purifier_token; "
+            "printf '%s' \"$purifier_token\" > .secrets/purifier-token; unset purifier_token)\n"
+            "chmod 600 .secrets/purifier-token\n"
+            "Run check.command (macOS), check.cmd (Windows), or ./check.sh (Linux) first. "
+            "check reads CPU and device "
             "status without changing the purifier.\n"
             "When present and ready to control the device, run run.command (macOS) or "
-            "run.cmd (Windows). Stop with Ctrl+C. Stopping does not restore the purifier's "
+            "run.cmd (Windows), or ./run.sh (Linux). Stop with Ctrl+C. Stopping does not restore the purifier's "
             "previous power, mode, or favorite level; restore them yourself if needed.\n"
             "Windows: Some CPU sensors need a separately installed PawnIO driver. The bundle "
             "cannot include or install it; only the computer owner should decide.\n"
+            "Linux: Requires readable coretemp CPU Package temperature sensors in "
+            "/sys/class/hwmon. Missing, unreadable, or invalid Package readings fail safely; "
+            "resolve the sensor problem before running device control. No external temperature "
+            "probe or target Python installation is needed.\n"
             "macOS: The operating system may require you to approve an unsigned app before "
             "the first launch.\n"
             "macOS: smctemp GPL-2.0-only license and version 0.7.0 source archive are in "
@@ -301,8 +316,11 @@ def main(argv: list[str] | None = None) -> int:
     elif sys.platform == "win32":
         platform_name = "windows"
         arch = "x64"
+    elif sys.platform == "linux":
+        platform_name = "linux"
+        arch = "x86_64"
     else:
-        print("Build failed: only macOS and Windows are supported", file=sys.stderr)
+        print("Build failed: only macOS, Windows and Linux are supported", file=sys.stderr)
         return 1
     output = args.output or Path("dist") / f"{platform_name}-{arch.lower()}"
     try:
