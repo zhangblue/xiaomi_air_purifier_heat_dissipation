@@ -486,6 +486,29 @@ class BundleTests(unittest.TestCase):
 
 
 class LinuxDocumentationTests(unittest.TestCase):
+    def test_readme_explains_linux_source_install_and_manual_run(self):
+        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+            encoding="utf-8")
+        heading = "## Linux x86_64 安装与运行"
+        self.assertIn(heading, readme)
+        section = readme.split(heading, 1)[1].split("## 配置与注意事项", 1)[0]
+        for required in (
+            "Ubuntu 26.04 x86_64", "python3.11 -m venv .venv",
+            ". .venv/bin/activate", "python -m pip install -e .",
+            "cp config.example.toml config.toml", 'platform = "linux"',
+            "[purifier].host", ".secrets/purifier-token", "getpass",
+            "chmod 700 .secrets", "chmod 600 .secrets/purifier-token",
+            "/sys/class/hwmon", "coretemp", "Package id N",
+            "zhimi.airpurifier.v6", "Connection: connected",
+            "purifier-control --config config.toml check",
+            "purifier-control --config config.toml run", "Ctrl+C",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, section)
+        self.assertLess(section.index("purifier-control --config config.toml check"),
+                        section.index("purifier-control --config config.toml run"))
+        self.assertIn("[跨平台打包指南](docs/bundle-build.md)", readme)
+
     def test_guide_explains_linux_portable_build_and_manual_runtime(self):
         guide = (Path(__file__).resolve().parents[1] / "docs" / "bundle-build.md").read_text(encoding="utf-8")
         for text in ("Ubuntu 26.04 x86_64", "原生构建", "dist/linux-x86_64/",

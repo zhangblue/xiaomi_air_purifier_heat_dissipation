@@ -70,6 +70,37 @@ purifier-control --config .\config.toml run
 探针应输出含 `temperature_c` 的 JSON。`0°C` 不是有效的 CPU 读数，探针会报错并列出发现的温度传感器。若在 Ryzen 电脑上看到 `Core (Tctl/Tdie)=0`，先确认使用管理员权限；LibreHardwareMonitor 的底层读取还可能需要安装 [PawnIO 官方签名驱动](https://github.com/namazso/PawnIO.Setup/releases)。驱动会取得硬件访问权限，应由电脑所有者决定是否安装；不要为此关闭 Windows 内存完整性等安全保护。安装后重新运行探针，只有读到可信的非零温度且 `check` 成功，再运行 `run`；按 `Ctrl+C` 停止。停止后净化器保持当时的电源和档位状态。
 
 
+## Linux x86_64 安装与运行
+
+面向 Ubuntu 26.04 x86_64，需要可用的 Python 3.11 及其 venv 支持，以及同一局域网中的净化器。使用项目内的虚拟环境，不替换 Ubuntu 系统 Python。Linux 温度采集只支持 `/sys/class/hwmon` 中 `coretemp` 驱动的 CPU Package 传感器，标签必须为 `Package id N`（N 为非负整数）；缺少该传感器或读数无效时，请勿运行控制程序。
+
+在仓库目录打开终端：
+
+```sh
+python3.11 -m venv .venv
+. .venv/bin/activate
+python -m pip install -e .
+cp config.example.toml config.toml
+```
+
+把 `config.toml` 顶部改为 `platform = "linux"`，按需修改 `[purifier].host`。将这台设备的 **32 位十六进制局域网 token** 保存到 `.secrets/purifier-token`，文件内容只放 token，不加引号。不要把 token 写入配置、命令行参数或日志。以下输入提示不会回显 token，并将目录权限设为 700、文件权限设为 600：
+
+```sh
+mkdir -p .secrets
+chmod 700 .secrets
+python -c 'from getpass import getpass; from pathlib import Path; Path(".secrets/purifier-token").write_text(getpass("Token: "), encoding="ascii")'
+chmod 600 .secrets/purifier-token
+purifier-control --config config.toml check
+```
+
+`check` 只读，不更改净化器。确认输出包含可信的 CPU 温度、型号 `zhimi.airpurifier.v6` 和 `Connection: connected`，再在你在场且能观察和控制设备时手动运行：
+
+```sh
+purifier-control --config config.toml run
+```
+
+`run` 会开机并立即设置低温最爱档级别，达到高温条件后切换为高级别。按 `Ctrl+C` 停止；**程序停止不会关闭净化器，也不会恢复原档位**。如需关机或调整档位，请在米家 App 或设备上操作。本章节只介绍手动启动，不安装开机自启服务。使用预构建目录包时，请参阅 [跨平台打包指南](docs/bundle-build.md) 的目标机配置与验收步骤。
+
 ## 配置与注意事项
 
 `config.example.toml` 是可复制的起点。`token_file` 相对 `config.toml` 所在目录解析，默认是 `.secrets/purifier-token`。`platform` 只接受与当前电脑相符的 `macos`、`windows` 或 `linux`。`temperature_sensor` 当前只支持 `cpu`。默认每 5 秒采样一次；阈值要求低温恢复值小于高温触发值，低级别小于高级别，级别范围为 0–17。
