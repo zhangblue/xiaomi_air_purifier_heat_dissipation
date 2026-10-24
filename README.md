@@ -6,57 +6,11 @@
 
 ## 构建与迁移目录包
 
-目录包可复制到另一台**同操作系统、同 CPU 架构**的电脑，目标机无需另装 Python、Python 包、.NET Runtime 或 `smctemp`。macOS 与 Windows 要分别在对应系统上构建，不能跨系统或跨架构构建；较新系统构建的包也不保证兼容较旧系统。首版 Windows 构建目标为 x64；macOS 目前只接受已核验的 macOS arm64 `smctemp` 0.7.0 构建产物。其他架构或不同二进制需另行验证；Homebrew 安装本身不保证命中白名单。目标机仍须能读取 CPU 温度，并能通过局域网访问净化器。目录包不提供自动启动。
+目录包可复制到同操作系统、同 CPU 架构的目标电脑，目标机无需另装 Python、Python 包、.NET Runtime 或 `smctemp`。支持 macOS arm64、Windows x64 和 Ubuntu 26.04 x86_64；目标机仍须能读取 CPU 温度，并能通过局域网访问净化器。较新系统构建的包不保证兼容较旧系统。
 
-在项目根目录准备构建机。macOS 需 arm64 构建机、Python 3.11 和 Homebrew 安装的 `narugit/tap/smctemp`。构建器仅接受已核验的 arm64 `smctemp` 0.7.0 二进制，并核对其来源归档、许可证材料及系统依赖；Homebrew 安装本身不保证命中白名单，核对失败就停止构建。其他架构或不同二进制需另行验证。Windows 需 Python 3.11 和 .NET 8 SDK。两边均须安装项目的打包依赖：
+macOS 目前只接受已核验的 macOS arm64 `smctemp` 0.7.0 构建产物；Homebrew 安装本身不保证命中白名单，其他架构或不同二进制需另行验证。
 
-```sh
-# macOS
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -e '.[bundle]'
-.venv/bin/python -m tools.build_bundle
-# 自选尚不存在的输出目录：.venv/bin/python -m tools.build_bundle --output dist/my-mac
-```
-
-如果现有 `.venv` 已失效，或出现 `Build failed: PyInstaller failed with exit code 1`，请参阅 [macOS 打包环境与故障排查](docs/macos-bundle-build.md)。
-
-```powershell
-# Windows PowerShell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e '.[bundle]'
-.\.venv\Scripts\python.exe -m tools.build_bundle
-# 自选尚不存在的输出目录：.\.venv\Scripts\python.exe -m tools.build_bundle --output dist\my-pc
-```
-
-默认输出分别为 `dist/macos-<架构>/`、`dist/windows-x64/`。成功时命令会打印包路径；现有输出目录不会被覆盖。将整个目录复制到目标机。**token 和私有配置不进入构建包**，也不要把 token 放入命令参数、截图或日志。
-
-### 目标机配置（无需 Python）
-
-先进入复制后的包目录，将 `config.example.toml` 复制为 `config.toml`，修改 `[purifier].host`。把该设备的 32 位十六进制 token 复制到目标机剪贴板，再按目标系统执行以下命令；不要直接在终端粘贴 token。命令将剪贴板内容写入目标机的 `.secrets/purifier-token`，随后清空剪贴板。
-
-```sh
-# macOS：在复制后的包目录中执行
-cp config.example.toml config.toml
-mkdir -p .secrets
-chmod 700 .secrets
-(umask 077; pbpaste > .secrets/purifier-token)
-pbcopy < /dev/null
-chmod 600 .secrets/purifier-token
-```
-
-```powershell
-# Windows PowerShell：在复制后的包目录中执行
-Copy-Item .\config.example.toml .\config.toml
-New-Item -ItemType Directory -Force .\.secrets | Out-Null
-Get-Clipboard -Raw | Set-Content -NoNewline -Encoding ascii .\.secrets\purifier-token
-Set-Clipboard -Value ''
-```
-
-Windows 请在文件属性的“安全”页确认 token 文件只对自己的账户可读。若剪贴板来源含多余换行，程序会在读取 token 时去掉首尾空白；`check` 会拒绝无效 token。
-
-在目标机先运行只读的 `check.command`（macOS）或 `check.cmd`（Windows），确认温度、型号和设备连接后，在场时手动运行 `run.command` 或 `run.cmd`。按 `Ctrl+C` 停止。程序停止后**不会恢复净化器原来的电源、模式或最爱档级别**，如有需要请自行恢复并确认。macOS 对未签名程序可能显示安全提示，需由电脑所有者在系统设置中批准运行。Windows 有些温度传感器仍需所有者单独安装 PawnIO 驱动；目录包不包含或安装该驱动，不应为此关闭系统安全保护。
-
-macOS 包内 `bin/` 随附 `smctemp` 的 GPL-2.0-only 许可证及固定版本源码归档，供再分发时查阅；随附材料**不等同于法律审核**。本仓库的 macOS Python 测试或离线构建结果也不代表 Windows 已完成打包或目标机验收；需要在相应系统上分别构建并验证。真实设备的 `run` 验收应在用户在场时先记录状态，短时测试、停止、恢复原状态并读回确认。
+构建前提、各平台命令、Mac 上通过 Linux 容器构建的步骤，以及目标机配置与验收，请参阅 [跨平台打包指南](docs/bundle-build.md)。目录包不安装开机自启；token 和私有配置不进入构建包。先执行只读检查，在场时手动运行；程序停止后不会恢复净化器原状态。
 
 
 ## macOS 安装与运行
@@ -115,39 +69,6 @@ purifier-control --config .\config.toml run
 
 探针应输出含 `temperature_c` 的 JSON。`0°C` 不是有效的 CPU 读数，探针会报错并列出发现的温度传感器。若在 Ryzen 电脑上看到 `Core (Tctl/Tdie)=0`，先确认使用管理员权限；LibreHardwareMonitor 的底层读取还可能需要安装 [PawnIO 官方签名驱动](https://github.com/namazso/PawnIO.Setup/releases)。驱动会取得硬件访问权限，应由电脑所有者决定是否安装；不要为此关闭 Windows 内存完整性等安全保护。安装后重新运行探针，只有读到可信的非零温度且 `check` 成功，再运行 `run`；按 `Ctrl+C` 停止。停止后净化器保持当时的电源和档位状态。
 
-## Ubuntu 26.04 x86_64 构建与运行
-
-Linux 支持范围为 Ubuntu 26.04 x86_64，必须在 Linux x86_64 环境原生构建；macOS 或 Windows 不能生成 Linux 包。构建机需要 Python 3.11 和项目打包依赖，Ubuntu 的系统 Python 可保持不变。可在 Ubuntu 的 x86_64 Python 3.11 glibc 容器中隔离构建；仅挂载公开源码，不传入私有配置或 token。
-
-```sh
-# Linux x86_64 构建环境，在项目根目录执行
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -e '.[bundle]'
-.venv/bin/python -m tools.build_bundle
-```
-
-输出为 `dist/linux-x86_64/`。将整个目录复制到目标 Ubuntu 电脑，目标机无需另装 Python 或 Python 包。不同 CPU 架构、旧版 Linux、其他发行版或非 glibc 系统不保证兼容，需另行构建和验证。Ubuntu 26.04 是目标验收环境，离线测试通过不代表已完成 Ubuntu 构建、真实温度或设备连接验收。
-
-目标机必须在 `/sys/class/hwmon` 中提供可读的 `coretemp` CPU Package 传感器，标签格式为 `Package id N`；多个 Package 取最高温度。仅有核心温度、AMD 的 `k10temp` 或没有 Package 标签时不支持；缺失或无效温度会报错，首次有效温度前不会写入净化器。程序不安装驱动或修改内核配置。
-
-在复制后的包目录执行以下配置步骤，修改 `[purifier].host`，确认 `platform = "linux"`。用文本编辑器将该设备的 32 位十六进制 token 保存到 `.secrets/purifier-token`，文件只含 token；不要将其写入命令参数、日志或截图。
-
-```sh
-cp config.example.toml config.toml
-mkdir -p .secrets
-chmod 700 .secrets
-# 用文本编辑器创建 .secrets/purifier-token 后设置权限
-chmod 600 .secrets/purifier-token
-./check.sh
-```
-
-先执行只读的 `check.sh`，确认 CPU 温度可信、型号正确且连接成功，再在场时手动运行 `run.sh`：
-
-```sh
-./run.sh
-```
-
-程序取得首次有效温度后会开机并设置低温最爱档。按 `Ctrl+C` 停止；停止后不会恢复净化器原来的电源、模式或最爱档级别，需要自行恢复并读回确认。Linux 同样不安装开机自启服务。真实写控制验收必须由用户明确要求且在场，测试前记录状态，短时测试后停止、恢复原状态并再次读回。
 
 ## 配置与注意事项
 

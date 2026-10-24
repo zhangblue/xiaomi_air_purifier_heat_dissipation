@@ -226,11 +226,10 @@ class BundleTests(unittest.TestCase):
                 self.assertIn(required, guide)
 
     def test_portable_target_setup_uses_native_token_commands(self):
-        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(
+        readme = (Path(__file__).resolve().parents[1] / "docs" / "bundle-build.md").read_text(
             encoding="utf-8")
-        self.assertIn("### 目标机配置", readme)
-        target_steps = readme.split("### 目标机配置", 1)[1].split(
-            "## macOS 安装与运行", 1)[0]
+        self.assertIn("## 目标机配置与验收", readme)
+        target_steps = readme.split("## 目标机配置与验收", 1)[1]
         self.assertIn("pbpaste > .secrets/purifier-token", target_steps)
         self.assertIn("Get-Clipboard -Raw", target_steps)
         self.assertNotIn("python -c", target_steps)
@@ -498,6 +497,25 @@ class LinuxDocumentationTests(unittest.TestCase):
 
 
 class BundleGuideDocumentationTests(unittest.TestCase):
+    def test_readme_links_guide_without_duplicate_bundle_instructions(self):
+        root = Path(__file__).resolve().parents[1]
+        readme = (root / "README.md").read_text(encoding="utf-8")
+        self.assertIn("[跨平台打包指南](docs/bundle-build.md)", readme)
+        self.assertNotIn("macOS 或 Windows 不能生成 Linux 包", readme)
+        self.assertNotIn("-m tools.build_bundle", readme)
+        self.assertNotIn("### 目标机配置", readme)
+        for heading in ("## macOS 安装与运行", "## Windows 安装与运行",
+                        "## 配置与注意事项", "### 如何获取 token"):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, readme)
+
+    def test_macos_troubleshooting_links_guide_sections(self):
+        root = Path(__file__).resolve().parents[1]
+        troubleshooting = (root / "docs" / "macos-bundle-build.md").read_text(encoding="utf-8")
+        self.assertIn("bundle-build.md#macos-arm64", troubleshooting)
+        self.assertIn("bundle-build.md#目标机配置与验收", troubleshooting)
+        self.assertNotIn("../README.md#", troubleshooting)
+
     def test_guide_covers_platform_builds_and_safe_container_boundary(self):
         guide = (Path(__file__).resolve().parents[1] / "docs" / "bundle-build.md").read_text(encoding="utf-8")
         for text in ("macOS arm64", "Windows x64", "Linux x86_64",
