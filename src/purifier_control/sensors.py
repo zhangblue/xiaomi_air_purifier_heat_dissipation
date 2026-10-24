@@ -3,8 +3,9 @@
 import json
 import math
 import os
+import re
 import subprocess
-from pathlib import PureWindowsPath
+from pathlib import Path, PureWindowsPath
 from typing import Protocol
 
 
@@ -33,6 +34,30 @@ def _run_probe(command: list[str], timeout: float) -> str:
     if result.returncode != 0:
         raise SensorError("CPU temperature probe failed")
     return result.stdout
+
+
+class LinuxTemperatureSource:
+    def __init__(self, hwmon_root: Path = Path("/sys/class/hwmon")) -> None:
+        self._root = hwmon_root
+
+    def read(self) -> float:
+        values = []
+        try:
+            for hwmon in self._root.glob("hwmon*"):
+                if (hwmon / "name").read_text().strip() != "coretemp":
+                    continue
+                for label_path in hwmon.glob("temp*_label"):
+                    label = label_path.read_text().strip()
+                    if re.fullmatch(r"Package id [0-9]+", label):
+                        input_path = label_path.with_name(
+                            label_path.name.replace("_label", "_input"))
+                        raw = int(input_path.read_text())
+                        values.append(_valid_temperature(raw / 1000))
+        except (OSError, UnicodeError, ValueError, OverflowError):
+            raise SensorError("CPU Package temperature could not be read") from None
+        if not values:
+            raise SensorError("CPU Package temperature is unavailable")
+        return max(values)
 
 
 class MacOSTemperatureSource:

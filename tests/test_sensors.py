@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -8,10 +9,76 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from purifier_control.sensors import (
+    LinuxTemperatureSource,
     MacOSTemperatureSource,
     SensorError,
     WindowsTemperatureSource,
 )
+
+
+class LinuxTemperatureSourceTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+
+    def package(self, name="hwmon0", driver="coretemp", label="Package id 0",
+                value="61000"):
+        directory = self.root / name
+        directory.mkdir()
+        (directory / "name").write_text(driver + "\n")
+        (directory / "temp1_label").write_text(label + "\n")
+        if value is not None:
+            (directory / "temp1_input").write_text(value + "\n")
+        return directory
+
+    def test_reads_package_millicelsius(self):
+        self.package()
+        self.assertEqual(LinuxTemperatureSource(self.root).read(), 61.0)
+
+    def test_returns_hottest_package(self):
+        self.package(value="61000")
+        self.package("hwmon1", label="Package id 1", value="72500")
+        self.assertEqual(LinuxTemperatureSource(self.root).read(), 72.5)
+
+    def test_ignores_other_drivers_and_non_package_labels(self):
+        self.package(driver="other", value="99000")
+        self.package("hwmon1", label="Package id 0 extra", value="98000")
+        self.package("hwmon2", label="Core 0", value="97000")
+        self.package("hwmon3", value="61000")
+        self.assertEqual(LinuxTemperatureSource(self.root).read(), 61.0)
+
+    def test_requires_a_coretemp_package(self):
+        self.package(driver="other")
+        with self.assertRaises(SensorError):
+            LinuxTemperatureSource(self.root).read()
+
+    def test_any_bad_package_fails_without_exposing_path_or_contents(self):
+        self.package(value="61000")
+        broken = self.package("hwmon1", label="Package id 1") / "temp1_input"
+        for value in ("0", "126000", "private-invalid", None):
+            with self.subTest(value=value):
+                if value is None:
+                    broken.unlink()
+                else:
+                    broken.write_text(value)
+                with self.assertRaises(SensorError) as caught:
+                    LinuxTemperatureSource(self.root).read()
+                self.assertNotIn(str(self.root), str(caught.exception))
+                self.assertNotIn("private-invalid", str(caught.exception))
+
+    def test_unreadable_files_fail_safely(self):
+        directory = self.package()
+        original = Path.read_text
+        for filename in ("name", "temp1_label", "temp1_input"):
+            def read(path, *args, **kwargs):
+                if path == directory / filename:
+                    raise PermissionError("private-path-and-content")
+                return original(path, *args, **kwargs)
+            with self.subTest(filename=filename), patch.object(Path, "read_text", read):
+                with self.assertRaises(SensorError) as caught:
+                    LinuxTemperatureSource(self.root).read()
+                self.assertNotIn("private", str(caught.exception))
 
 
 class MacOSTemperatureSourceTests(unittest.TestCase):

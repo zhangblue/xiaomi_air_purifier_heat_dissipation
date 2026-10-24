@@ -11,7 +11,7 @@ from purifier_control.config import AppConfig, load_config
 from purifier_control.policy import TemperaturePolicy
 from purifier_control.purifier import MiioPurifier, PurifierError, PurifierModelMismatch
 from purifier_control.runner import Runner
-from purifier_control.sensors import (MacOSTemperatureSource, SensorError,
+from purifier_control.sensors import (LinuxTemperatureSource, MacOSTemperatureSource, SensorError,
                                       WindowsTemperatureSource)
 
 
@@ -25,6 +25,8 @@ CONFIG_FIELDS = (
 
 
 def make_sensor(config: AppConfig):
+    if config.platform == "linux":
+        return LinuxTemperatureSource()
     program = "smctemp" if config.platform == "macos" else "TemperatureProbe.exe"
     path = shutil.which(program)
     if path is None:

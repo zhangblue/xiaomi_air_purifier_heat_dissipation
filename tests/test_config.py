@@ -61,6 +61,13 @@ class ConfigTests(unittest.TestCase):
         config = load_config(self.config_path(platform="windows"), running_platform="win32")
         self.assertEqual(config.platform, "windows")
 
+    def test_linux_config_is_accepted_only_on_linux(self):
+        path = self.config_path(platform="linux")
+        self.assertEqual(load_config(path, running_platform="linux").platform, "linux")
+        for platform in ("darwin", "win32"):
+            with self.subTest(platform=platform), self.assertRaisesRegex(ValueError, "platform"):
+                load_config(path, running_platform=platform)
+
     def test_example_config_uses_confirmed_control_defaults(self):
         example_path = Path(__file__).resolve().parents[1] / "config.example.toml"
         config_path = self.directory / "config.toml"

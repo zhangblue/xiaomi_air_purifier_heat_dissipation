@@ -3,6 +3,7 @@ import logging
 import sys
 import unittest
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,7 +17,7 @@ from purifier_control.policy import TemperaturePolicy
 from purifier_control.purifier import MiioPurifier, PurifierError, PurifierLevelRejected
 from purifier_control.sensors import SensorError
 from purifier_control.runner import Runner
-from purifier_control.cli import main
+from purifier_control.cli import main, make_sensor
 from tests.test_purifier import FakeDevice
 
 
@@ -360,6 +361,13 @@ class RunnerTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_linux_sensor_uses_sysfs_without_external_program_lookup(self):
+        from purifier_control.sensors import LinuxTemperatureSource
+        with patch("purifier_control.cli.shutil.which",
+                   side_effect=AssertionError("Linux must not look up a program")):
+            self.assertIsInstance(make_sensor(replace(CONFIG, platform="linux")),
+                                  LinuxTemperatureSource)
+
     def test_check_config_error_names_field_without_leaking_value(self):
         for field in ("high_duration_seconds", "high_favorite_level"):
             with self.subTest(field=field):

@@ -81,8 +81,8 @@ def load_config(path: Path, running_platform: str | None = None) -> AppConfig:
     platform = _string(data, "platform", path)
     actual_platform = running_platform if running_platform is not None else sys.platform
     actual_platform = {"darwin": "macos", "win32": "windows"}.get(actual_platform, actual_platform)
-    if platform not in ("macos", "windows") or platform != actual_platform:
-        raise ValueError(f"{path}: platform must be macos or windows and match the running system")
+    if platform not in ("macos", "windows", "linux") or platform != actual_platform:
+        raise ValueError(f"{path}: platform must be macos, windows or linux and match the running system")
 
     purifier = _table(data, "purifier", path)
     host = _string(purifier, "host", path)
