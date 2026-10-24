@@ -1,6 +1,6 @@
 # 电脑温度联动米家空气净化器 Pro
 
-在 macOS 或 Windows 上手动运行，读取本机 CPU 温度，并在局域网内控制 AC-M3-CA（设备内部型号 `zhimi.airpurifier.v6`）的最爱档。默认配置在 CPU 温度持续高于 60°C 达 15 秒后使用级别 17；持续低于 55°C 达 120 秒后回到级别 3。级别是设备的最爱档数值，不是转速百分比。首次使用前请确认净化器 IP、型号及这两个级别适用于自己的设备。
+在 macOS、Windows 或 Linux 上手动运行，读取本机 CPU 温度，并在局域网内控制 AC-M3-CA（设备内部型号 `zhimi.airpurifier.v6`）的最爱档。默认配置在 CPU 温度持续高于 60°C 达 15 秒后使用级别 17；持续低于 55°C 达 120 秒后回到级别 3。级别是设备的最爱档数值，不是转速百分比。首次使用前请确认净化器 IP、型号及这两个级别适用于自己的设备。
 
 净化器增加周围空气流动，**不能代替电脑自身散热或过热保护**。本程序不会控制电脑风扇。第一版只支持手动启动，不安装开机自启服务；`run` 是无需交互的入口，留待以后接入 macOS LaunchAgent 或 Windows 任务计划程序。
 
@@ -115,9 +115,43 @@ purifier-control --config .\config.toml run
 
 探针应输出含 `temperature_c` 的 JSON。`0°C` 不是有效的 CPU 读数，探针会报错并列出发现的温度传感器。若在 Ryzen 电脑上看到 `Core (Tctl/Tdie)=0`，先确认使用管理员权限；LibreHardwareMonitor 的底层读取还可能需要安装 [PawnIO 官方签名驱动](https://github.com/namazso/PawnIO.Setup/releases)。驱动会取得硬件访问权限，应由电脑所有者决定是否安装；不要为此关闭 Windows 内存完整性等安全保护。安装后重新运行探针，只有读到可信的非零温度且 `check` 成功，再运行 `run`；按 `Ctrl+C` 停止。停止后净化器保持当时的电源和档位状态。
 
+## Ubuntu 26.04 x86_64 构建与运行
+
+Linux 支持范围为 Ubuntu 26.04 x86_64，必须在 Linux x86_64 环境原生构建；macOS 或 Windows 不能生成 Linux 包。构建机需要 Python 3.11 和项目打包依赖，Ubuntu 的系统 Python 可保持不变。可在 Ubuntu 的 x86_64 Python 3.11 glibc 容器中隔离构建；仅挂载公开源码，不传入私有配置或 token。
+
+```sh
+# Linux x86_64 构建环境，在项目根目录执行
+python3.11 -m venv .venv
+.venv/bin/python -m pip install -e '.[bundle]'
+.venv/bin/python -m tools.build_bundle
+```
+
+输出为 `dist/linux-x86_64/`。将整个目录复制到目标 Ubuntu 电脑，目标机无需另装 Python 或 Python 包。不同 CPU 架构、旧版 Linux、其他发行版或非 glibc 系统不保证兼容，需另行构建和验证。Ubuntu 26.04 是目标验收环境，离线测试通过不代表已完成 Ubuntu 构建、真实温度或设备连接验收。
+
+目标机必须在 `/sys/class/hwmon` 中提供可读的 `coretemp` CPU Package 传感器，标签格式为 `Package id N`；多个 Package 取最高温度。仅有核心温度、AMD 的 `k10temp` 或没有 Package 标签时不支持；缺失或无效温度会报错，首次有效温度前不会写入净化器。程序不安装驱动或修改内核配置。
+
+在复制后的包目录执行以下配置步骤，修改 `[purifier].host`，确认 `platform = "linux"`。用文本编辑器将该设备的 32 位十六进制 token 保存到 `.secrets/purifier-token`，文件只含 token；不要将其写入命令参数、日志或截图。
+
+```sh
+cp config.example.toml config.toml
+mkdir -p .secrets
+chmod 700 .secrets
+# 用文本编辑器创建 .secrets/purifier-token 后设置权限
+chmod 600 .secrets/purifier-token
+./check.sh
+```
+
+先执行只读的 `check.sh`，确认 CPU 温度可信、型号正确且连接成功，再在场时手动运行 `run.sh`：
+
+```sh
+./run.sh
+```
+
+程序取得首次有效温度后会开机并设置低温最爱档。按 `Ctrl+C` 停止；停止后不会恢复净化器原来的电源、模式或最爱档级别，需要自行恢复并读回确认。Linux 同样不安装开机自启服务。真实写控制验收必须由用户明确要求且在场，测试前记录状态，短时测试后停止、恢复原状态并再次读回。
+
 ## 配置与注意事项
 
-`config.example.toml` 是可复制的起点。`token_file` 相对 `config.toml` 所在目录解析，默认是 `.secrets/purifier-token`。`platform` 只接受与当前电脑相符的 `macos` 或 `windows`。`temperature_sensor` 当前只支持 `cpu`。默认每 5 秒采样一次；阈值要求低温恢复值小于高温触发值，低级别小于高级别，级别范围为 0–17。
+`config.example.toml` 是可复制的起点。`token_file` 相对 `config.toml` 所在目录解析，默认是 `.secrets/purifier-token`。`platform` 只接受与当前电脑相符的 `macos`、`windows` 或 `linux`。`temperature_sensor` 当前只支持 `cpu`。默认每 5 秒采样一次；阈值要求低温恢复值小于高温触发值，低级别小于高级别，级别范围为 0–17。
 
 净化器 IP 默认 `192.168.250.118`。如果路由器重新分配地址，请更新 `[purifier].host`。局域网或温度探针暂时不可用时，程序会报告故障并重试；遇到设备拒绝级别时应停止运行并核对可用档位。`check` 报型号不符时请勿运行控制程序。
 

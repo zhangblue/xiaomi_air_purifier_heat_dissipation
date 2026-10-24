@@ -77,6 +77,18 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.control.high_duration_seconds, 15)
         self.assertEqual(config.control.recover_temperature_c, 55)
         self.assertEqual(config.control.recover_duration_seconds, 120)
+        self.assertEqual(config.platform, "macos")
+        self.assertEqual(config.purifier.host, "192.168.250.118")
+        self.assertEqual(config.system.sample_interval_seconds, 5)
+        self.assertEqual(config.control.high_favorite_level, 17)
+        self.assertEqual(config.control.low_favorite_level, 3)
+
+    def test_example_comments_explain_linux_and_preserve_chinese_guidance(self):
+        example = (Path(__file__).resolve().parents[1] / "config.example.toml").read_text(encoding="utf-8")
+        for text in ('Linux 使用 "linux"', 'platform = "macos"',
+                     "净化器在局域网中的 IP 地址", "不是风速百分比", "恢复阈值必须低于升档阈值"):
+            with self.subTest(text=text):
+                self.assertIn(text, example)
 
     def test_config_is_immutable_and_repr_does_not_disclose_token(self):
         config = load_config(self.config_path(), running_platform="darwin")

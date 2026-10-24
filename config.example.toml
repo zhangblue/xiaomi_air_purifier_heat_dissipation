@@ -1,20 +1,26 @@
-# Set to "windows" when running on Windows; it must match this computer.
+# 运行平台必须与当前电脑一致：Mac 使用 "macos"，Windows 使用 "windows"，Linux 使用 "linux"。
 platform = "macos"
 
 [purifier]
+# 净化器在局域网中的 IP 地址。
 host = "192.168.250.118"
-# Relative to this configuration file. Keep the token out of this file.
+# token 文件路径相对于本配置文件；不要把 token 直接写在配置文件中。
 token_file = ".secrets/purifier-token"
 
 [system]
+# 当前仅支持读取 CPU 温度；每隔指定秒数采样一次。
 temperature_sensor = "cpu"
 sample_interval_seconds = 5
 
 [control]
+# CPU 温度持续高于此值达到指定秒数后，切换到高风速最爱档。
 high_temperature_c = 60
 high_duration_seconds = 15
+# CPU 温度持续低于此值达到指定秒数后，恢复到低风速最爱档。
+# 恢复阈值必须低于升档阈值，避免在边界温度附近频繁切换。
 recover_temperature_c = 55
 recover_duration_seconds = 120
-# Confirm that this specific purifier accepts both levels before unattended use.
+# 两个数值都是最爱档级别，不是风速百分比；范围为 0–17，且低档必须小于高档。
+# 无人值守运行前，请确认这台净化器接受所配置的两个级别。
 high_favorite_level = 17
 low_favorite_level = 3
