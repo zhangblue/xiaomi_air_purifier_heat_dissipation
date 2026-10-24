@@ -487,14 +487,26 @@ class BundleTests(unittest.TestCase):
 
 
 class LinuxDocumentationTests(unittest.TestCase):
-    def test_readme_explains_linux_portable_build_and_manual_runtime(self):
-        readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    def test_guide_explains_linux_portable_build_and_manual_runtime(self):
+        guide = (Path(__file__).resolve().parents[1] / "docs" / "bundle-build.md").read_text(encoding="utf-8")
         for text in ("Ubuntu 26.04 x86_64", "原生构建", "dist/linux-x86_64/",
                      "目标机无需另装 Python", "coretemp", "Package id N",
                      "只读的 `check.sh`", "在场时手动运行 `run.sh`",
                      "不会恢复净化器", "不安装开机自启服务"):
             with self.subTest(text=text):
-                self.assertIn(text, readme)
+                self.assertIn(text, guide)
+
+
+class BundleGuideDocumentationTests(unittest.TestCase):
+    def test_guide_covers_platform_builds_and_safe_container_boundary(self):
+        guide = (Path(__file__).resolve().parents[1] / "docs" / "bundle-build.md").read_text(encoding="utf-8")
+        for text in ("macOS arm64", "Windows x64", "Linux x86_64",
+                     "python -m tools.build_bundle", "--platform linux/amd64",
+                     "gcc libc6-dev", "pyproject.toml config.example.toml src tools README.md tests docs",
+                     "只读", "--help", "check.sh", "run.sh", "私有配置",
+                     "token", "不会被覆盖", "config.toml", ".secrets", ".git", ".venv"):
+            with self.subTest(text=text):
+                self.assertIn(text, guide)
 
 
 if __name__ == "__main__":
